@@ -1,0 +1,39 @@
+name: Stage 4 hosted staging QA
+
+on:
+  push:
+    branches:
+      - stage-4-hosted-qa
+
+jobs:
+  hosted-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: sudo apt-get update && sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+
+      - name: Run hosted staging E2E
+        env:
+          STAGE3_URL: https://trek-jacket-finder-kghferlu0-lukaszs-projects-d71b6aef.vercel.app
+          CHROME_BIN: /usr/bin/chromium
+        run: npm run e2e:stage3
+
+      - name: Upload hosted QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4-hosted-qa-evidence
+          path: stage3-e2e-report.json
+          if-no-files-found: error
