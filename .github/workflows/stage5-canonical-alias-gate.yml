@@ -1,0 +1,147 @@
+name: Stage 5 canonical alias gate
+
+on:
+  push:
+    branches:
+      - stage-5-production-control
+    paths:
+      - .github/workflows/stage5-canonical-alias-gate.yml
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_MAIN_SHA: 926452d67ed4c9ea06d29e848974995ffdca509f
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  NEW_DEPLOYMENT_ID: dpl_CjhCa85w7QoPNix2Gdx8rCb4tKWW
+  NEW_DEPLOYMENT_URL: https://trek-jacket-finder-8rpr2s184-lukaszs-projects-d71b6aef.vercel.app
+  PRODUCTION_DOMAIN: trek-jacket-finder.vercel.app
+  PRODUCTION_URL: https://trek-jacket-finder.vercel.app
+  ROLLBACK_DEPLOYMENT_ID: dpl_5K45KnvaPhBk95XHFD7DuaDfPrte
+  ROLLBACK_URL: https://trek-jacket-finder-df222zm0g-lukaszs-projects-d71b6aef.vercel.app
+
+jobs:
+  canonical-alias-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact verified main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_SHA }}
+
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install validate and rebuild reference artifact
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run validate:data
+          npm run validate:ui
+          npm run build
+          test -f dist/assets/index-DRZzhiVY.js
+          test -f dist/assets/index-BRAmPyZq.css
+          test "$(wc -c <dist/assets/index-DRZzhiVY.js)" = 283580
+          test "$(wc -c <dist/assets/index-BRAmPyZq.css)" = 11783
+
+      - name: Bind production project
+        run: |
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+
+      - name: Point canonical alias to verified production artifact
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          printf 'source=%s\nnew_deployment=%s\nnew_url=%s\ncanonical=%s\nrollback=%s\n' "$EXPECTED_MAIN_SHA" "$NEW_DEPLOYMENT_ID" "$NEW_DEPLOYMENT_URL" "$PRODUCTION_DOMAIN" "$ROLLBACK_DEPLOYMENT_ID" | tee stage5-canonical-evidence.txt
+          npx --yes vercel@59.16.0 alias set "$NEW_DEPLOYMENT_URL" "$PRODUCTION_DOMAIN" --token "$VERCEL_TOKEN" 2>&1 | tee stage5-alias-set.txt
+          touch stage5-alias-switched.flag
+
+      - name: Verify canonical alias serves exact artifact bytes
+        run: |
+          set -euo pipefail
+          MATCH=0
+          STATUS=0
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            STATUS="$(curl -sS -o stage5-production-index.html -w '%{http_code}' "$PRODUCTION_URL/?stage5canonical=$i")"
+            if [ "$STATUS" = 200 ] && grep -Eq 'src="/assets/index-DRZzhiVY\.js"' stage5-production-index.html && grep -Eq 'href="/assets/index-BRAmPyZq\.css"' stage5-production-index.html; then MATCH=1; break; fi
+            sleep 2
+          done
+          echo "production_http=$STATUS bundle_match=$MATCH" | tee -a stage5-canonical-evidence.txt
+          test "$STATUS" = 200
+          test "$MATCH" = 1
+          JS_STATUS="$(curl -sS -o /tmp/prod-app.js -w '%{http_code}' "$PRODUCTION_URL/assets/index-DRZzhiVY.js")"
+          CSS_STATUS="$(curl -sS -o /tmp/prod-app.css -w '%{http_code}' "$PRODUCTION_URL/assets/index-BRAmPyZq.css")"
+          printf 'production_js=%s bytes=%s\nproduction_css=%s bytes=%s\n' "$JS_STATUS" "$(wc -c </tmp/prod-app.js)" "$CSS_STATUS" "$(wc -c </tmp/prod-app.css)" | tee -a stage5-canonical-evidence.txt
+          test "$JS_STATUS" = 200
+          test "$CSS_STATUS" = 200
+          cmp -s dist/assets/index-DRZzhiVY.js /tmp/prod-app.js
+          cmp -s dist/assets/index-BRAmPyZq.css /tmp/prod-app.css
+
+      - name: Full 35-check post-production QA
+        env:
+          STAGE3_URL: ${{ env.PRODUCTION_URL }}
+        run: node scripts/e2e-stage3.mjs
+
+      - name: Hard production browser diagnostics
+        env:
+          STAGE3_URL: ${{ env.PRODUCTION_URL }}
+        run: |
+          node --input-type=module <<'NODE' | tee stage5-production-diagnostics.json
+          import { chromium } from 'playwright-core'
+          import { existsSync } from 'node:fs'
+          const candidates=[process.env.CHROME_BIN,'/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser'].filter(Boolean)
+          const executablePath=candidates.find(p=>existsSync(p)); if(!executablePath) throw new Error('No Chrome/Chromium')
+          const report={badResponses:[],consoleErrors:[],failedRequests:[],pageErrors:[]}
+          const browser=await chromium.launch({executablePath,headless:true,args:['--no-sandbox']})
+          const context=await browser.newContext({viewport:{width:1440,height:1000}})
+          const page=await context.newPage()
+          page.on('response',r=>{if(r.status()>=400) report.badResponses.push({status:r.status(),url:r.url(),resourceType:r.request().resourceType()})})
+          page.on('console',m=>{if(m.type()==='error') report.consoleErrors.push({text:m.text(),location:m.location()})})
+          page.on('requestfailed',r=>report.failedRequests.push({url:r.url(),error:r.failure()?.errorText||''}))
+          page.on('pageerror',e=>report.pageErrors.push(String(e)))
+          await page.goto(process.env.STAGE3_URL,{waitUntil:'domcontentloaded',timeout:30000})
+          await page.waitForSelector('[data-testid="scenario-selector"]',{timeout:15000})
+          await page.waitForTimeout(5000)
+          console.log(JSON.stringify(report,null,2))
+          await browser.close()
+          if(Object.values(report).some(v=>v.length)) process.exitCode=1
+          NODE
+
+      - name: Restore canonical alias on any post-switch failure
+        if: failure()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -f stage5-alias-switched.flag ]; then
+            echo "Gate failed; restoring canonical alias to $ROLLBACK_DEPLOYMENT_ID"
+            npx --yes vercel@59.16.0 alias set "$ROLLBACK_URL" "$PRODUCTION_DOMAIN" --token "$VERCEL_TOKEN"
+          else
+            echo "Canonical alias was not switched; restore not needed"
+          fi
+
+      - name: Upload Stage 5 canonical evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage5-canonical-production-evidence
+          path: |
+            stage3-e2e-report.json
+            stage3-e2e-desktop.png
+            stage3-e2e-mobile.png
+            stage5-alias-set.txt
+            stage5-production-index.html
+            stage5-production-diagnostics.json
+            stage5-canonical-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 30
