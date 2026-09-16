@@ -7,40 +7,24 @@ export type ProductImageMeta = {
   color?: string
 }
 
-const PRODUCT_IMAGE_PROXY =
-  'https://trek-jacket-finder-h6a4gul9m-lukaszs-projects-d71b6aef.vercel.app/api/product-image?url='
-
-const proxied = (url: string) => `${PRODUCT_IMAGE_PROXY}${encodeURIComponent(url)}`
-
 const image = (
-  originalUrl: string,
-  sourceUrl = originalUrl,
+  imageUrl: string,
+  sourceUrl = imageUrl,
   sourceLabel = 'Zweryfikowane źródło zdjęcia',
   color?: string,
+  imageFallbacks: string[] = [],
 ): ProductImageMeta => ({
   imageStatus: 'verified',
-  imageUrl: proxied(originalUrl),
-  imageFallbacks: [originalUrl],
+  imageUrl,
+  imageFallbacks,
   imageSourceLabel: sourceLabel,
   imageSourceUrl: sourceUrl,
   color,
 })
 
-const productPage = (
-  productUrl: string,
-  sourceLabel = 'Zweryfikowana strona dokładnego modelu',
-  color?: string,
-): ProductImageMeta => ({
-  imageStatus: 'verified',
-  imageUrl: proxied(productUrl),
-  imageFallbacks: [],
-  imageSourceLabel: sourceLabel,
-  imageSourceUrl: productUrl,
-  color,
-})
-
 /**
- * Stage 3 image references recovered from the verified production UI on 16.09.2026.
+ * Stage 3 image references recovered from the verified production UI and then
+ * hardened on 16.09.2026 to avoid a protected Vercel deployment proxy.
  * These references are presentation metadata only. Product facts remain sourced from
  * the authoritative Stage 2 DATA PACK.
  */
@@ -51,10 +35,10 @@ export const productImages: Record<string, ProductImageMeta> = {
     '4camping — dokładny model Norrøna falketind thermo40',
   ),
   'rab-xenair-alpine-light': image(
-    'https://www.outside.co.uk/media/catalog/product/cache/1/image/9df78eab33525d08d6e5fb8d27136e95/r/a/rab-m-xenair-alpine-light-jacket-qip-17-tmb-tempest-blue-04-w25.jpg',
-    'https://www.outside.co.uk/mens-clothing/mens-jackets/mens-insulated-jackets/rab-xenair-alpine-light-jacket-m-70117.html',
-    'Outside — Rab Xenair Alpine Light',
-    'Tempest Blue',
+    'https://rab.equipment/media/catalog/product/x/e/xenair_alpine_light_jacket_black_qip_17_blk_1.jpg?optimize=medium&fit=bounds&height=822&width=548&canvas=548:822',
+    'https://rab.equipment/eu/mens-xenair-alpine-light-insulated-jacket',
+    'Rab — Xenair Alpine Light Insulated Jacket',
+    'Black',
   ),
   'peak-freelight-alpha': image(
     'https://www.peakperformance.com/us/media/catalog/product/cache/47a61cd39417a8407e88c1f76cc311d9/article_images/G80110020/G80110020_cb62bf5c1b631b36e8ddfb16b0683d3c.jpg?auto=webp&crop=3%3A4&format=pjpg&optimize=low&width=1440',
@@ -67,10 +51,9 @@ export const productImages: Record<string, ProductImageMeta> = {
     'Outnorth / Fjellsport — La Sportiva Aequilibrium Lite',
   ),
   'dynafit-mezzalama-alpha': image(
-    'https://www.polarsport.pl/media/catalog/product/cache/ed1dd25b44ac74c9dca085c463c89987/k/u/kurtka-meska-dynafit-mezzalama-polartec-alpha-rock-khaki-04.jpg',
-    undefined,
-    'Polarsport — Dynafit Mezzalama Alpha',
-    'Rock Khaki',
+    'https://oberalp.imgix.net/89522292-20dd-41bd-996d-185d05398e5e.png?type=still&auto=format&fit=clip&w=1200&cs=srgb',
+    'https://www.dynafit.com/mezzalama-polartec_-alpha_-jacket-men-08-0000071596',
+    'Dynafit — Mezzalama Polartec Alpha Jacket Men',
   ),
   'or-deviator': image(
     'https://www.outdoorresearch.com/cdn/shop/files/3004652566A3.png?v=1723760908&width=1426',
@@ -89,7 +72,8 @@ export const productImages: Record<string, ProductImageMeta> = {
     'Mountain Equipment — Switch Pro Hooded Jacket',
     'Redrock / Dusk',
   ),
-  'mammut-aenergy-ml-hybrid': productPage(
+  'mammut-aenergy-ml-hybrid': image(
+    'https://static.mammut.com/cdn-cgi/image/width=960,quality=85,f=auto,metadata=none/master/1014-07870-0001_main_300832.jpg',
     'https://www.mammut.com/pl/pl/products/1014-07870-0001/aenergy-ml-hybrid-hooded-jacket-men',
     'Mammut — Aenergy ML Hybrid Hooded Jacket Men',
   ),
@@ -110,14 +94,16 @@ export const productImages: Record<string, ProductImageMeta> = {
     'Alpinstore — Ortovox Venet Swisswool 60',
     'Blue Nunatak',
   ),
-  'houdini-tech-insulation-houdi': productPage(
-    'https://houdinisportswear.com/en-na/collections/men/products/ms-tech-insulation-houdi',
+  'houdini-tech-insulation-houdi': image(
+    'https://houdinisportswear.com/cdn/shop/files/820042_900_100_Men_Tech_Insulation_Houdi_true_black_c_low.webp?crop=center&height=1200&v=1788259121&width=1200',
+    'https://houdinisportswear.com/en-na/products/ms-tech-insulation-houdi',
     "Houdini — M's Tech Insulation Houdi",
+    'True Black',
   ),
-  'montane-sirocco-xt': productPage(
+  'montane-sirocco-xt': image(
+    'https://montane.com/cdn/shop/files/MSXTH_DAS_A_2_square_9fabc018-dde6-4ab2-9001-d88ed09ff89b_grande.jpg?v=1784736487',
     'https://montane.com/products/montane-mens-sirocco-xt-hooded-insulated-jacket?color=Moss',
     'Montane — Sirocco XT Hooded Insulated Jacket',
-    'Moss',
   ),
   'klattermusen-alv2': image(
     'https://itsheatwave.co.nz/cdn/shop/files/klattermusen-mens-alv-20-jacket-black-heatwave-287493.jpg?v=1721195092&width=480',
@@ -131,7 +117,8 @@ export const productImages: Record<string, ProductImageMeta> = {
     'Sportano — VAUDE Sesvenna IV 42970',
     'Woodland',
   ),
-  'goldwin-pertex-qa': productPage(
+  'goldwin-pertex-qa': image(
+    'https://item-shopping.c.yimg.jp/i/n/linkfast_goldwin-gm25306_i_20250626194941',
     'https://store.shopping.yahoo.co.jp/linkfast/goldwin-gm25306.html',
     'Zweryfikowane źródło GM25306 UNISEX',
   ),
@@ -140,7 +127,8 @@ export const productImages: Record<string, ProductImageMeta> = {
     undefined,
     'Cumulus — Climalite Full Zip',
   ),
-  'milo-nafo': productPage(
+  'milo-nafo': image(
+    'https://milo.pl/2680-home_default/techniczna-hybrydowa-kurtka-meska-nafo.jpg',
     'https://milo.pl/pl/144714-techniczna-hybrydowa-kurtka-meska-nafo.html',
     'Milo — Nafo',
   ),
