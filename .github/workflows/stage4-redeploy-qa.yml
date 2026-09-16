@@ -1,4 +1,4 @@
-name: Stage 6 production deploy
+name: Stage 6 production verification
 
 on:
   push:
@@ -8,63 +8,85 @@ permissions:
   contents: read
 
 env:
-  SOURCE_SHA: 2efd033b33efecdaf87d5f37ae7f12a64397e849
-  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
-  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  EXPECTED_MAIN_SHA: 2efd033b33efecdaf87d5f37ae7f12a64397e849
+  PRODUCTION_URL: https://trek-jacket-finder.vercel.app
 
 jobs:
-  deploy-production:
+  production-qa:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout exact validated main
+      - name: Checkout exact authoritative main
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.SOURCE_SHA }}
+          ref: ${{ env.EXPECTED_MAIN_SHA }}
 
       - name: Verify source SHA
-        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Revalidate exact source
-        run: |
-          npm install --no-audit --no-fund
-          npm run validate:data
-          npm run validate:ui
-          npm run build
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
 
-      - name: Verify Vercel credential is available
+      - name: Run full production browser E2E
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "VERCEL_TOKEN secret is not configured"
-            exit 2
-          fi
+          STAGE3_URL: ${{ env.PRODUCTION_URL }}
+        run: npm run e2e:stage3
 
-      - name: Deploy exact validated main to production project
+      - name: Enforce clean production browser diagnostics and local assets
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          STAGE3_URL: ${{ env.PRODUCTION_URL }}
         run: |
-          mkdir -p .vercel
-          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
-          npm install --global vercel@59.16.0 --no-audit --no-fund
-          URL="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN")"
-          echo "STAGE6_PRODUCTION_URL=$URL" | tee stage6-production-url.txt
-          case "$URL" in
-            *trek-jacket-finder*) ;;
-            *) echo "Unexpected production deployment URL: $URL"; exit 1 ;;
-          esac
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright-core'
+          import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+          const candidates = ['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser']
+          const executablePath = candidates.find(existsSync)
+          if (!executablePath) throw new Error('Chrome/Chromium not found')
+          const report = JSON.parse(readFileSync('stage3-e2e-report.json', 'utf8'))
+          const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
+          const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+          const badResponses = []
+          const consoleErrors = []
+          const failedRequests = []
+          const pageErrors = []
+          page.on('response', r => { if (r.status() >= 400) badResponses.push({ status:r.status(), url:r.url() }) })
+          page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()) })
+          page.on('requestfailed', r => failedRequests.push({ url:r.url(), error:r.failure()?.errorText || '' }))
+          page.on('pageerror', e => pageErrors.push(String(e)))
+          await page.goto(process.env.STAGE3_URL, { waitUntil:'networkidle', timeout:30000 })
+          await page.waitForSelector('[data-testid="scenario-selector"]', { timeout:15000 })
+          const assets = await page.evaluate(() => ({
+            scripts: [...document.scripts].map(s => s.src).filter(Boolean),
+            styles: [...document.querySelectorAll('link[rel="stylesheet"]')].map(l => l.href).filter(Boolean),
+          }))
+          const origin = new URL(process.env.STAGE3_URL).origin
+          const appAssets = [...assets.scripts, ...assets.styles].filter(u => u.includes('/assets/'))
+          const foreignAppAssets = appAssets.filter(u => !u.startsWith(origin + '/assets/'))
+          const diagnostics = { badResponses, consoleErrors, failedRequests, pageErrors, appAssets, foreignAppAssets,
+            e2eConsoleErrors: report.consoleErrors || [], e2eFailedRequests: report.failedRequests || [], e2ePageErrors: report.pageErrors || [] }
+          writeFileSync('stage6-production-diagnostics.json', JSON.stringify(diagnostics, null, 2))
+          console.log(JSON.stringify(diagnostics, null, 2))
+          await browser.close()
+          const dirty = badResponses.length || consoleErrors.length || failedRequests.length || pageErrors.length || foreignAppAssets.length ||
+            diagnostics.e2eConsoleErrors.length || diagnostics.e2eFailedRequests.length || diagnostics.e2ePageErrors.length
+          if (appAssets.length < 2) throw new Error(`Expected local JS+CSS assets, got ${appAssets.length}`)
+          if (dirty) process.exit(1)
+          NODE
 
-      - name: Upload production deployment URL
+      - name: Upload production QA evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage6-production-deployment-url
-          path: stage6-production-url.txt
+          name: stage6-production-e2e-evidence
+          path: |
+            stage3-e2e-report.json
+            stage3-e2e-desktop.png
+            stage3-e2e-mobile.png
+            stage6-production-diagnostics.json
           if-no-files-found: ignore
-          retention-days: 2
+          retention-days: 14
