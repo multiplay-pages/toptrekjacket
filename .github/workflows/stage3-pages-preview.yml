@@ -1,0 +1,53 @@
+name: Stage 3 temporary Pages preview
+
+on:
+  push:
+    branches: [stage-3-full-ui]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: stage3-pages-preview
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate authoritative data
+        run: npm run validate:data
+      - name: Validate Stage 3 UI
+        run: npm run validate:ui
+      - name: Build static preview
+        run: npx vite build --base /toptrekjacket/
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy temporary Stage 3 preview
+        id: deployment
+        uses: actions/deploy-pages@v4
