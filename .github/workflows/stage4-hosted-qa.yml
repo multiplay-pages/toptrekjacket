@@ -13,6 +13,7 @@ env:
   STAGING_DEPLOYMENT_ID: dpl_7e6uuGp24tCMFPAfqU9RSVdDzUGJ
   STAGING_BASE_URL: https://trek-jacket-finder-qpjvkp1sb-lukaszs-projects-d71b6aef.vercel.app
   VERCEL_TEAM_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
 
 jobs:
   hosted-e2e:
@@ -51,7 +52,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create temporary Vercel share URL securely
+      - name: Create temporary automation bypass on QA project
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
@@ -60,17 +61,17 @@ jobs:
           RESPONSE="$(curl -fsS -X PATCH \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data '{"ttl":7200}' \
-            "https://api.vercel.com/aliases/$STAGING_DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID")"
-          BYPASS="$(node -e 'const j=JSON.parse(process.argv[1]); if(!j.value) process.exit(2); process.stdout.write(j.value)' "$RESPONSE")"
+            --data '{"generate":{"note":"Stage 4 hosted QA temporary"}}' \
+            "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID")"
+          BYPASS="$(node -e 'const j=JSON.parse(process.argv[1]); const v=typeof j.protectionBypass==="string"?j.protectionBypass:j.protectionBypass?.secret; if(!v) process.exit(2); process.stdout.write(v)' "$RESPONSE")"
           echo "::add-mask::$BYPASS"
-          echo "STAGING_SHARE_URL=$STAGING_BASE_URL/?_vercel_share=$BYPASS" >> "$GITHUB_ENV"
+          echo "VERCEL_AUTOMATION_BYPASS_SECRET=$BYPASS" >> "$GITHUB_ENV"
 
-      - name: Verify hosted HTML and local assets over authenticated preview
+      - name: Verify hosted HTML and local assets with automation bypass
         run: |
           set -euo pipefail
-          BASE_URL="$STAGING_BASE_URL"
-          curl -fsSL -c stage4-cookies.txt -b stage4-cookies.txt "$STAGING_SHARE_URL" -o stage4-index.html
+          AUTH=(-H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" -H 'x-vercel-set-bypass-cookie: true')
+          curl -fsSL "${AUTH[@]}" "$STAGING_BASE_URL/" -o stage4-index.html
           echo "--- hosted index asset references ---"
           grep -Eo '(src|href)="[^"]+"' stage4-index.html | tee stage4-asset-refs.txt
           grep -Eq 'src="/assets/[^"]+\.js"' stage4-index.html
@@ -81,23 +82,37 @@ jobs:
           fi
           JS_PATH="$(grep -Eo 'src="/assets/[^"]+\.js"' stage4-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/')"
           CSS_PATH="$(grep -Eo 'href="/assets/[^"]+\.css"' stage4-index.html | head -1 | sed -E 's/^href="([^"]+)"$/\1/')"
-          JS_STATUS="$(curl -sS -L -c stage4-cookies.txt -b stage4-cookies.txt -o /tmp/stage4-app.js -w '%{http_code}' "$BASE_URL$JS_PATH")"
-          CSS_STATUS="$(curl -sS -L -c stage4-cookies.txt -b stage4-cookies.txt -o /tmp/stage4-app.css -w '%{http_code}' "$BASE_URL$CSS_PATH")"
+          JS_STATUS="$(curl -sS -L "${AUTH[@]}" -o /tmp/stage4-app.js -w '%{http_code}' "$STAGING_BASE_URL$JS_PATH")"
+          CSS_STATUS="$(curl -sS -L "${AUTH[@]}" -o /tmp/stage4-app.css -w '%{http_code}' "$STAGING_BASE_URL$CSS_PATH")"
           printf 'deployment=%s\nbase=%s\njs=%s http=%s bytes=%s\ncss=%s http=%s bytes=%s\n' \
-            "$STAGING_DEPLOYMENT_ID" "$BASE_URL" "$JS_PATH" "$JS_STATUS" "$(wc -c </tmp/stage4-app.js)" "$CSS_PATH" "$CSS_STATUS" "$(wc -c </tmp/stage4-app.css)" | tee stage4-http-evidence.txt
+            "$STAGING_DEPLOYMENT_ID" "$STAGING_BASE_URL" "$JS_PATH" "$JS_STATUS" "$(wc -c </tmp/stage4-app.js)" "$CSS_PATH" "$CSS_STATUS" "$(wc -c </tmp/stage4-app.css)" | tee stage4-http-evidence.txt
           test "$JS_STATUS" = "200"
           test "$CSS_STATUS" = "200"
           test -s /tmp/stage4-app.js
           test -s /tmp/stage4-app.css
 
-      - name: Run exact Stage 3 E2E against hosted staging
+      - name: Prepare auth-only copy of exact Stage 3 E2E
+        run: |
+          cp scripts/e2e-stage3.mjs stage4-e2e-auth.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const path = 'stage4-e2e-auth.mjs'
+          let src = readFileSync(path, 'utf8')
+          const needle = "const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })\n"
+          const injected = needle + `if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {\n  const protectedOrigin = new URL(URL).origin\n  await context.route(protectedOrigin + '/**', async route => {\n    await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET, 'x-vercel-set-bypass-cookie': 'true' } })\n  })\n}\n`
+          if (!src.includes(needle)) throw new Error('Expected Stage 3 browser context hook not found')
+          src = src.replace(needle, injected)
+          writeFileSync(path, src)
+          NODE
+
+      - name: Run Stage 3 35-check suite against hosted staging
         env:
-          STAGE3_URL: ${{ env.STAGING_SHARE_URL }}
-        run: npm run e2e:stage3
+          STAGE3_URL: ${{ env.STAGING_BASE_URL }}
+        run: node stage4-e2e-auth.mjs
 
       - name: Diagnose browser console and HTTP errors
         env:
-          STAGE3_URL: ${{ env.STAGING_SHARE_URL }}
+          STAGE3_URL: ${{ env.STAGING_BASE_URL }}
         run: |
           node --input-type=module <<'NODE' | tee stage4-browser-diagnostics.json
           import { chromium } from 'playwright-core'
@@ -119,13 +134,13 @@ jobs:
           const pageErrors = []
           const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
           const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+          const protectedOrigin = new URL(process.env.STAGE3_URL).origin
+          await context.route(protectedOrigin + '/**', async route => {
+            await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET, 'x-vercel-set-bypass-cookie': 'true' } })
+          })
           const page = await context.newPage()
           page.on('response', response => {
-            if (response.status() >= 400) badResponses.push({
-              status: response.status(),
-              url: response.url(),
-              resourceType: response.request().resourceType(),
-            })
+            if (response.status() >= 400) badResponses.push({ status: response.status(), url: response.url(), resourceType: response.request().resourceType() })
           })
           page.on('console', message => {
             if (message.type() === 'error') consoleErrors.push({ text: message.text(), location: message.location() })
@@ -137,9 +152,7 @@ jobs:
           await page.waitForSelector('[data-testid="scenario-selector"]', { timeout: 15000 })
           await page.waitForTimeout(5000)
           console.log(JSON.stringify({ badResponses, consoleErrors, failedRequests, pageErrors }, null, 2))
-          if (badResponses.length || consoleErrors.length || failedRequests.length || pageErrors.length) {
-            process.exitCode = 1
-          }
+          if (badResponses.length || consoleErrors.length || failedRequests.length || pageErrors.length) process.exitCode = 1
           await browser.close()
           NODE
 
@@ -158,3 +171,17 @@ jobs:
             stage4-browser-diagnostics.json
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Revoke temporary automation bypass
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then exit 0; fi
+          BODY="$(node -e 'process.stdout.write(JSON.stringify({revoke:{secret:process.env.VERCEL_AUTOMATION_BYPASS_SECRET,regenerate:false}}))')"
+          curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data "$BODY" \
+            "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID" >/dev/null
