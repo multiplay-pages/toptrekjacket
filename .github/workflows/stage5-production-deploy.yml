@@ -1,0 +1,84 @@
+name: Stage 5 production deploy
+
+on:
+  push:
+    branches:
+      - stage-5-production-control
+    paths:
+      - .github/workflows/stage5-production-deploy.yml
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_MAIN_SHA: 926452d67ed4c9ea06d29e848974995ffdca509f
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  PRODUCTION_URL: https://trek-jacket-finder.vercel.app
+  ROLLBACK_DEPLOYMENT_ID: dpl_5K45KnvaPhBk95XHFD7DuaDfPrte
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact verified main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_SHA }}
+
+      - name: Verify exact source commit
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate and build exact verified source
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run validate:data
+          npm run validate:ui
+          npm run build
+          test -f dist/assets/index-DRZzhiVY.js
+          test -f dist/assets/index-BRAmPyZq.css
+          grep -Eq 'src="/assets/index-DRZzhiVY\.js"' dist/index.html
+          grep -Eq 'href="/assets/index-BRAmPyZq\.css"' dist/index.html
+          ! grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' dist/index.html
+
+      - name: Bind CLI to production Vercel project
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<JSON
+          {"orgId":"$VERCEL_ORG_ID","projectId":"$VERCEL_PROJECT_ID"}
+          JSON
+
+      - name: Deploy exact source to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          echo "rollback=$ROLLBACK_DEPLOYMENT_ID" | tee stage5-deploy-evidence.txt
+          echo "source=$EXPECTED_MAIN_SHA" | tee -a stage5-deploy-evidence.txt
+          npx --yes vercel@59.16.0 deploy --prod --yes --token "$VERCEL_TOKEN" 2>&1 | tee -a stage5-deploy-evidence.txt
+
+      - name: Smoke production alias
+        run: |
+          set -euo pipefail
+          STATUS="$(curl -sS -o /tmp/prod-index.html -w '%{http_code}' "$PRODUCTION_URL/")"
+          echo "production_http=$STATUS" | tee -a stage5-deploy-evidence.txt
+          test "$STATUS" = 200
+          grep -Eq 'src="/assets/[^"]+\.js"' /tmp/prod-index.html
+          grep -Eq 'href="/assets/[^"]+\.css"' /tmp/prod-index.html
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage5-production-deploy-evidence
+          path: stage5-deploy-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 30
