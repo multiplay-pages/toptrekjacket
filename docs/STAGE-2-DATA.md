@@ -58,9 +58,9 @@ Stage 2 intentionally does **not** change:
 - [x] Evidence uncertainty is represented structurally.
 - [x] Critical six-model guardrails are encoded.
 - [x] No numeric scores invented for #11–20.
-- [ ] `npm run validate:data` passes in GitHub Actions.
-- [ ] `npm run build` passes in GitHub Actions.
+- [x] `npm run validate:data` passes in GitHub Actions — PR #2 run `35063846429`.
+- [x] `npm run build` passes in GitHub Actions — PR #2 run `35063846429`.
 - [ ] PR merged to `main`.
-- [ ] Vercel production remains unchanged.
+- [x] Vercel production remains unchanged — `dpl_5K45KnvaPhBk95XHFD7DuaDfPrte` is still the production deployment.
 
 Stage 2 is PASS only after the CI checks above pass and the PR is merged.
