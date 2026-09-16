@@ -1,0 +1,147 @@
+name: Stage 7 production release
+
+on:
+  push:
+    branches: [stage-7-production-control]
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: 2ad9a3898c3fb1cd96083d8e9089186829937900
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  CANONICAL_URL: https://trek-jacket-finder.vercel.app
+  CANONICAL_ALIAS: trek-jacket-finder.vercel.app
+  ROLLBACK_URL: https://trek-jacket-finder-9ftga3r5y-lukaszs-projects-d71b6aef.vercel.app
+
+jobs:
+  production-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact authoritative main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install validate and build
+        run: |
+          npm install --no-audit --no-fund
+          npm run validate:data
+          npm run validate:ui
+          npm run build
+      - name: Prepare immutable prebuilt output
+        run: |
+          mkdir -p .vercel/output/static .vercel
+          cp -R dist/. .vercel/output/static/
+          printf '{"version":3}' > .vercel/output/config.json
+          printf '{"orgId":"%s","projectId":"%s"}' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+          JS=$(grep -oE 'src="/assets/[^"]+\.js"' dist/index.html | head -1 | cut -d'"' -f2)
+          CSS=$(grep -oE 'href="/assets/[^"]+\.css"' dist/index.html | head -1 | cut -d'"' -f2)
+          test -n "$JS" && test -n "$CSS"
+          echo "EXPECTED_JS=$JS" >> "$GITHUB_ENV"
+          echo "EXPECTED_CSS=$CSS" >> "$GITHUB_ENV"
+          sha256sum "dist$JS" | cut -d' ' -f1 > expected-js.sha
+          sha256sum "dist$CSS" | cut -d' ' -f1 > expected-css.sha
+      - name: Deploy prebuilt artifact to production project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          test -n "$VERCEL_TOKEN"
+          npx --yes vercel@latest deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" > stage7-production-url.txt
+          PROD_URL=$(tail -n 1 stage7-production-url.txt | tr -d '\r')
+          test -n "$PROD_URL"
+          echo "PROD_URL=$PROD_URL" >> "$GITHUB_ENV"
+          echo "New deployment: $PROD_URL"
+      - name: Verify immutable deployment bundle before canonical switch
+        run: |
+          for attempt in $(seq 1 30); do
+            if HTML=$(curl -fsS "$PROD_URL"); then
+              printf '%s' "$HTML" > prod-deployment-index.html
+              if printf '%s' "$HTML" | grep -Fq "$EXPECTED_JS" && printf '%s' "$HTML" | grep -Fq "$EXPECTED_CSS"; then
+                break
+              fi
+            fi
+            if [ "$attempt" -eq 30 ]; then echo 'Deployment bundle not ready'; exit 1; fi
+            sleep 2
+          done
+          curl -fsS "$PROD_URL$EXPECTED_JS" -o deployed-app.js
+          curl -fsS "$PROD_URL$EXPECTED_CSS" -o deployed-app.css
+          test "$(sha256sum deployed-app.js | cut -d' ' -f1)" = "$(cat expected-js.sha)"
+          test "$(sha256sum deployed-app.css | cut -d' ' -f1)" = "$(cat expected-css.sha)"
+      - name: Switch canonical alias to verified Stage 7 deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --yes vercel@latest alias set "$PROD_URL" "$CANONICAL_ALIAS" --token="$VERCEL_TOKEN"
+          echo "ALIAS_SWITCHED=true" >> "$GITHUB_ENV"
+      - name: Wait for canonical byte gate
+        run: |
+          for attempt in $(seq 1 30); do
+            if HTML=$(curl -fsS "$CANONICAL_URL"); then
+              printf '%s' "$HTML" > canonical-index.html
+              if printf '%s' "$HTML" | grep -Fq "$EXPECTED_JS" && printf '%s' "$HTML" | grep -Fq "$EXPECTED_CSS"; then
+                curl -fsS "$CANONICAL_URL$EXPECTED_JS" -o canonical-app.js
+                curl -fsS "$CANONICAL_URL$EXPECTED_CSS" -o canonical-app.css
+                if [ "$(sha256sum canonical-app.js | cut -d' ' -f1)" = "$(cat expected-js.sha)" ] && [ "$(sha256sum canonical-app.css | cut -d' ' -f1)" = "$(cat expected-css.sha)" ]; then
+                  exit 0
+                fi
+              fi
+            fi
+            sleep 2
+          done
+          echo 'Canonical byte gate failed'
+          exit 1
+      - name: Full Stage 7 post-production E2E
+        env:
+          STAGE3_URL: ${{ env.CANONICAL_URL }}
+        run: npm run e2e:stage7
+      - name: Hard production browser diagnostics
+        env:
+          TARGET_URL: ${{ env.CANONICAL_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright-core'
+          const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']})
+          const context=await browser.newContext()
+          const page=await context.newPage(); const d={badResponses:[],consoleErrors:[],failedRequests:[],pageErrors:[]}
+          page.on('response',r=>{if(r.status()>=400)d.badResponses.push({status:r.status(),url:r.url()})})
+          page.on('console',m=>{if(m.type()==='error')d.consoleErrors.push(m.text())})
+          page.on('requestfailed',r=>d.failedRequests.push({url:r.url(),error:r.failure()?.errorText||''}))
+          page.on('pageerror',e=>d.pageErrors.push(String(e)))
+          await page.goto(process.env.TARGET_URL,{waitUntil:'networkidle',timeout:30000})
+          await page.evaluate(()=>document.querySelectorAll('img').forEach(img=>{img.loading='eager'}))
+          await page.locator('[data-testid="full-data-section"]').scrollIntoViewIfNeeded(); await page.waitForTimeout(12000)
+          console.log(JSON.stringify(d,null,2)); await browser.close()
+          if(Object.values(d).some(items=>items.length)) process.exit(1)
+          NODE
+      - name: Upload production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage7-production-evidence
+          path: |
+            stage7-e2e-report.json
+            stage7-e2e-desktop.png
+            stage7-e2e-mobile.png
+            stage7-production-url.txt
+            canonical-index.html
+            prod-deployment-index.html
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Roll back canonical alias on any post-switch failure
+        if: failure()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "${ALIAS_SWITCHED:-false}" = "true" ]; then
+            echo 'Stage 7 failed after alias switch; restoring Stage 6 canonical alias.'
+            npx --yes vercel@latest alias set "$ROLLBACK_URL" "$CANONICAL_ALIAS" --token="$VERCEL_TOKEN"
+          else
+            echo 'Failure occurred before canonical alias switch; no rollback needed.'
+          fi
