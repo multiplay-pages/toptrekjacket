@@ -1,4 +1,4 @@
-name: Stage 2 data + build check
+name: Trek Jacket Finder checks
 
 on:
   push:
@@ -23,5 +23,7 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Validate authoritative product data
         run: npm run validate:data
+      - name: Validate Stage 3 UI integrity
+        run: npm run validate:ui
       - name: Build
         run: npm run build
