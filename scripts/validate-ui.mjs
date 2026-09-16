@@ -30,7 +30,11 @@ for (const token of [
   'data-testid="ranking-section"',
   'data-testid="full-data-section"',
   'Uwzględnij moje preferencje wizualne w shortlistcie',
-  'Nie przypisano oceny liczbowej w audycie.',
+  'Ranking opisowy',
+  'data-testid="top-gsm"',
+  'data-testid="top-limitations"',
+  'Cena / referencja',
+  'detail-summary-specs-',
   'Porównanie: {compareIds.length}/4',
   'SourceLinks',
   'ProductPhoto',
@@ -41,12 +45,14 @@ if (app.includes('Stage 1 recovery scaffold')) failures.push('legacy Stage 1 sca
 if (app.includes("imageStatus: 'needs-verification'")) failures.push('UI reintroduces Stage 2 image placeholder state')
 
 if (failures.length) {
-  console.error('Stage 3 UI validation FAIL')
+  console.error('Stage 6 UI validation FAIL')
   for (const failure of failures) console.error(`- ${failure}`)
   process.exit(1)
 }
 
-console.log('Stage 3 UI validation PASS')
+console.log('Stage 6 UI validation PASS')
 console.log(`- product image metadata: ${jackets.length}/20`)
 console.log('- required selector, TOP3, TOP20, full-data and comparison hooks present')
-console.log('- explicit no-numeric-rating fallback present')
+console.log('- TOP3 gsm + limitations presentation guardrails present')
+console.log('- explicit descriptive-ranking fallback for #11–20 present')
+console.log('- comparison price/reference and compact DATA PACK summary present')
