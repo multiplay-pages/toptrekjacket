@@ -1,9 +1,7 @@
 name: Stage 4 redeploy QA preview
 
 on:
-  push:
-    branches:
-      - stage-4-hosted-qa
+  workflow_dispatch:
 
 permissions:
   contents: read
