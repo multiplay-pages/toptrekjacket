@@ -53,7 +53,7 @@ jobs:
       - name: Verify hosted HTML and local assets over authenticated preview
         run: |
           set -euo pipefail
-          BASE_URL="${STAGING_SHARE_URL%%/?*}"
+          BASE_URL="$(printf '%s' "$STAGING_SHARE_URL" | sed -E 's#^(https?://[^/]+).*$#\1#')"
           curl -fsSL -c stage4-cookies.txt -b stage4-cookies.txt "$STAGING_SHARE_URL" -o stage4-index.html
           echo "--- hosted index asset references ---"
           grep -Eo '(src|href)="[^"]+"' stage4-index.html | tee stage4-asset-refs.txt
