@@ -2,12 +2,17 @@ name: Stage 4 redeploy QA preview
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact main commit to deploy to isolated QA preview
+        required: true
+        default: 926452d67ed4c9ea06d29e848974995ffdca509f
 
 permissions:
   contents: read
 
 env:
-  SOURCE_SHA: 926452d67ed4c9ea06d29e848974995ffdca509f
+  SOURCE_SHA: ${{ inputs.source_sha }}
   VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
   VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
 
