@@ -1,4 +1,4 @@
-name: Stage 6 corrected production-project preview
+name: Stage 6 corrected production deploy
 
 on:
   push:
@@ -13,7 +13,7 @@ env:
   VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
 
 jobs:
-  corrected-preview:
+  corrected-production:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -37,7 +37,7 @@ jobs:
           npm run validate:ui
           npm run build
 
-      - name: Deploy corrected Vite build as preview only
+      - name: Deploy corrected Vite build to production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
@@ -54,12 +54,12 @@ jobs:
           }
           JSON
           npm install --global vercel@59.16.0 --no-audit --no-fund
-          URL="$(vercel deploy --yes --token="$VERCEL_TOKEN")"
-          echo "STAGE6_CORRECTED_PREVIEW_URL=$URL" | tee stage6-corrected-preview-url.txt
+          URL="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN")"
+          echo "STAGE6_CORRECTED_PRODUCTION_URL=$URL" | tee stage6-corrected-production-url.txt
 
-      - name: Upload preview URL
+      - name: Upload production URL
         uses: actions/upload-artifact@v4
         with:
-          name: stage6-corrected-production-project-preview-url
-          path: stage6-corrected-preview-url.txt
+          name: stage6-corrected-production-url
+          path: stage6-corrected-production-url.txt
           retention-days: 2
