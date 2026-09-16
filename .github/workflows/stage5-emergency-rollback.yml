@@ -1,0 +1,61 @@
+name: Stage 5 emergency rollback
+
+on:
+  push:
+    branches:
+      - stage-5-production-control
+    paths:
+      - .github/workflows/stage5-emergency-rollback.yml
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  ROLLBACK_DEPLOYMENT_ID: dpl_5K45KnvaPhBk95XHFD7DuaDfPrte
+  PRODUCTION_URL: https://trek-jacket-finder.vercel.app
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout control branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Bind production project
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<JSON
+          {"orgId":"$VERCEL_ORG_ID","projectId":"$VERCEL_PROJECT_ID"}
+          JSON
+
+      - name: Roll back production traffic
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          echo "rollback_target=$ROLLBACK_DEPLOYMENT_ID" | tee stage5-rollback-evidence.txt
+          npx --yes vercel@59.16.0 rollback "$ROLLBACK_DEPLOYMENT_ID" --yes --token "$VERCEL_TOKEN" 2>&1 | tee -a stage5-rollback-evidence.txt
+
+      - name: Verify production responds after rollback
+        run: |
+          STATUS="$(curl -sS -o /tmp/prod.html -w '%{http_code}' "$PRODUCTION_URL/")"
+          echo "production_http=$STATUS" | tee -a stage5-rollback-evidence.txt
+          test "$STATUS" = 200
+
+      - name: Upload rollback evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage5-rollback-evidence
+          path: stage5-rollback-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 30
