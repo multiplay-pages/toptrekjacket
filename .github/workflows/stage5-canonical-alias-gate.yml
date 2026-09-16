@@ -1,11 +1,7 @@
 name: Stage 5 canonical alias gate
 
 on:
-  push:
-    branches:
-      - stage-5-production-control
-    paths:
-      - .github/workflows/stage5-canonical-alias-gate.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
