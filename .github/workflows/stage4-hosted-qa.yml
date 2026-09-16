@@ -5,13 +5,33 @@ on:
     branches:
       - stage-4-hosted-qa
 
+permissions:
+  contents: read
+
+env:
+  EXPECTED_MAIN_SHA: 47e954aec64b23abf54316835704bf9b00e1f422
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
+  VERCEL_CLI_VERSION: 59.16.0
+
 jobs:
-  hosted-qa:
+  deploy-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
-      - name: Checkout
+      - name: Checkout exact main application commit
         uses: actions/checkout@v4
+        with:
+          ref: 47e954aec64b23abf54316835704bf9b00e1f422
+
+      - name: Verify source commit
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          echo "Expected main: $EXPECTED_MAIN_SHA"
+          echo "Checked out:   $ACTUAL_SHA"
+          test "$ACTUAL_SHA" = "$EXPECTED_MAIN_SHA"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -21,19 +41,89 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run hosted staging E2E
-        env:
-          STAGE3_URL: https://trek-jacket-finder-kghferlu0-lukaszs-projects-d71b6aef.vercel.app
-        run: npm run e2e:stage3
+      - name: Validate authoritative data and UI
+        run: |
+          npm run validate:data
+          npm run validate:ui
 
-      - name: Upload hosted QA evidence
+      - name: Build exact main
+        run: npm run build
+
+      - name: Gate local dist asset topology
+        run: |
+          test -f dist/index.html
+          echo "--- dist/index.html asset references ---"
+          grep -Eo '(src|href)="[^"]+"' dist/index.html || true
+          grep -Eq 'src="/assets/[^"]+\.js"' dist/index.html
+          grep -Eq 'href="/assets/[^"]+\.css"' dist/index.html
+          if grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' dist/index.html; then
+            echo "External GitHub-hosted asset reference found in dist/index.html"
+            exit 1
+          fi
+
+      - name: Verify Vercel deployment credential is available
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Repository secret VERCEL_TOKEN is not configured. Refusing to attempt deployment."
+            exit 1
+          fi
+
+      - name: Install pinned Vercel CLI
+        run: npm install --no-save --no-audit --no-fund "vercel@$VERCEL_CLI_VERSION"
+
+      - name: Link runner to QA project only
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<JSON
+          {"orgId":"$VERCEL_ORG_ID","projectId":"$VERCEL_PROJECT_ID"}
+          JSON
+          cat .vercel/project.json
+
+      - name: Deploy self-contained preview to QA project
+        id: deploy
+        run: |
+          set -euo pipefail
+          DEPLOYMENT_URL="$(npx vercel deploy --yes --token="$VERCEL_TOKEN")"
+          echo "Deployment URL: $DEPLOYMENT_URL"
+          echo "$DEPLOYMENT_URL" > stage4-staging-url.txt
+          echo "url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+          npx vercel inspect "$DEPLOYMENT_URL" --wait --timeout 5m --token="$VERCEL_TOKEN" | tee stage4-vercel-inspect.txt
+
+      - name: Verify hosted HTML uses local assets
+        env:
+          STAGING_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          npx vercel curl "$STAGING_URL/" --token="$VERCEL_TOKEN" -sS > stage4-index.html
+          echo "--- hosted index asset references ---"
+          grep -Eo '(src|href)="[^"]+"' stage4-index.html || true
+          grep -Eq 'src="/assets/[^"]+\.js"' stage4-index.html
+          grep -Eq 'href="/assets/[^"]+\.css"' stage4-index.html
+          if grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' stage4-index.html; then
+            echo "External GitHub-hosted asset reference found in hosted index.html"
+            exit 1
+          fi
+          JS_PATH="$(grep -Eo 'src="/assets/[^"]+\.js"' stage4-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/')"
+          CSS_PATH="$(grep -Eo 'href="/assets/[^"]+\.css"' stage4-index.html | head -1 | sed -E 's/^href="([^"]+)"$/\1/')"
+          printf 'JS_PATH=%s\nCSS_PATH=%s\n' "$JS_PATH" "$CSS_PATH" | tee stage4-assets.txt
+          JS_STATUS="$(npx vercel curl "$STAGING_URL$JS_PATH" --token="$VERCEL_TOKEN" -sS -o /tmp/stage4-app.js -w '%{http_code}')"
+          CSS_STATUS="$(npx vercel curl "$STAGING_URL$CSS_PATH" --token="$VERCEL_TOKEN" -sS -o /tmp/stage4-app.css -w '%{http_code}')"
+          echo "JS HTTP: $JS_STATUS" | tee -a stage4-assets.txt
+          echo "CSS HTTP: $CSS_STATUS" | tee -a stage4-assets.txt
+          test "$JS_STATUS" = "200"
+          test "$CSS_STATUS" = "200"
+          test -s /tmp/stage4-app.js
+          test -s /tmp/stage4-app.css
+
+      - name: Upload deployment evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage4-hosted-qa-evidence
+          name: stage4-staging-deploy-evidence
           path: |
-            stage3-e2e-report.json
-            stage3-e2e-desktop.png
-            stage3-e2e-mobile.png
-          if-no-files-found: error
+            stage4-staging-url.txt
+            stage4-vercel-inspect.txt
+            stage4-index.html
+            stage4-assets.txt
+          if-no-files-found: ignore
           retention-days: 14
