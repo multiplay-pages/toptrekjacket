@@ -1,0 +1,208 @@
+import { chromium } from 'playwright-core'
+import { existsSync, writeFileSync } from 'node:fs'
+
+const URL = process.env.STAGE3_URL || 'http://127.0.0.1:4173'
+const expectedTop3 = [
+  'falketind thermo40 Zip Hood Men',
+  'Xenair Alpine Light Insulated Jacket',
+  'Aequilibrium Lite Insulation Jkt M',
+]
+const expectedModels = [
+  'falketind thermo40 Zip Hood Men',
+  'Xenair Alpine Light Insulated Jacket',
+  'Freelight Polartec Alpha Insulated Hood Jacket',
+  'Aequilibrium Lite Insulation Jkt M',
+  'Mezzalama Polartec Alpha Jacket Men',
+  'Deviator Hoodie',
+  'Nano-Air Ultralight Full-Zip Hoody',
+  'Switch Pro Hooded Jacket',
+  'Aenergy ML Hybrid Hooded Jacket Men',
+  'Ortles Hybrid TirolWool Responsive Jacket',
+  'Proton Hoody',
+  'Venet Swisswool 60 Jacket M',
+  "M's Tech Insulation Houdi",
+  'Sirocco XT Hooded Insulated Jacket',
+  'Alv 2.0 Jacket Men',
+  'Sesvenna / Sesvenna IV 42970',
+  'PERTEX Quantum Air Insulated Jacket GM25306',
+  'Climalite Full Zip',
+  'Nafo',
+  'LIFALOFT Insulator Jacket',
+]
+
+const browserCandidates = [
+  process.env.CHROME_BIN,
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+].filter(Boolean)
+const executablePath = browserCandidates.find(path => existsSync(path))
+if (!executablePath) throw new Error(`No system Chrome/Chromium found: ${browserCandidates.join(', ')}`)
+
+const results = []
+const pageErrors = []
+const consoleErrors = []
+const failedRequests = []
+const pass = (name, detail = '') => results.push({ name, status: 'PASS', detail })
+const fail = (name, detail = '') => results.push({ name, status: 'FAIL', detail })
+const check = (name, condition, detail = '') => condition ? pass(name, detail) : fail(name, detail)
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+const page = await context.newPage()
+page.on('pageerror', error => pageErrors.push(String(error)))
+page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || '' }))
+
+try {
+  await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  await page.waitForSelector('[data-testid="scenario-selector"]', { timeout: 15000 })
+  await page.evaluate(() => localStorage.clear())
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-testid="scenario-selector"]')
+  pass('UI loads')
+
+  const top3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
+  check('Default TOP3 exact', JSON.stringify(top3) === JSON.stringify(expectedTop3), JSON.stringify(top3))
+
+  const rows = page.locator('tbody tr[data-testid^="rank-"]')
+  check('TOP20 has 20 rows', await rows.count() === 20, String(await rows.count()))
+  const rankingModels = []
+  for (let i = 1; i <= 20; i++) {
+    rankingModels.push(await page.locator(`[data-testid="rank-${i}"] td`).nth(1).locator('span').innerText())
+  }
+  check('TOP20 exact order', JSON.stringify(rankingModels) === JSON.stringify(expectedModels), JSON.stringify(rankingModels))
+
+  const bareDash = []
+  const emptyDataCells = []
+  for (let i = 1; i <= 20; i++) {
+    const cells = page.locator(`[data-testid="rank-${i}"] td`)
+    for (let j = 0; j < await cells.count(); j++) {
+      const text = (await cells.nth(j).innerText()).trim()
+      if (['—', '-', '–'].includes(text)) bareDash.push([i, j, text])
+      if (!text && j !== 12) emptyDataCells.push([i, j])
+    }
+  }
+  check('No bare dash placeholders in TOP20', bareDash.length === 0, JSON.stringify(bareDash))
+  check('No empty data cells in TOP20', emptyDataCells.length === 0, JSON.stringify(emptyDataCells))
+
+  const fallback = 'Nie przypisano oceny liczbowej w audycie.'
+  const badNoRating = []
+  for (let i = 11; i <= 20; i++) {
+    const cells = page.locator(`[data-testid="rank-${i}"] td`)
+    const values = []
+    for (let j = 5; j <= 10; j++) values.push((await cells.nth(j).innerText()).trim())
+    if (values.some(value => value !== fallback)) badNoRating.push([i, values])
+  }
+  check('#11–20 no invented numeric scores', badNoRating.length === 0, JSON.stringify(badNoRating))
+
+  check('Full data has 20 records', await page.locator('details[data-testid^="details-"]').count() === 20)
+  for (const index of [3, 9, 15, 17, 19, 20]) await page.locator(`[data-testid="details-${index}"] summary`).click()
+  const specialText = (await Promise.all([3, 9, 15, 17, 19, 20].map(index => page.locator(`[data-testid="details-${index}"]`).innerText()))).join('\n')
+  check('Peak disputed 68/85 visible', specialText.includes('68') && specialText.includes('85') && /sporn/i.test(specialText))
+  check('Mammut unpublished gsm visible', specialText.includes('Aenergy ML Hybrid') && /nie publikuje/i.test(specialText))
+  check('Klättermusen unpublished gsm visible', specialText.includes('Alv 2.0') && /nie publikuje/i.test(specialText))
+  check('Goldwin GM25306 + Quantum Air + Octa visible', specialText.includes('GM25306') && specialText.includes('PERTEX Quantum Air') && specialText.includes('Octa'))
+  check('Milo non-puffy gsm explanation visible', specialText.includes('Gelanots 3L') && /nie ma zastosowania/i.test(specialText))
+  check('HH unpublished gsm visible', specialText.includes('LIFALOFT') && /nie publikuje/i.test(specialText))
+
+  check('Default distance', await page.locator('#distance').inputValue() === '20–40 km', await page.locator('#distance').inputValue())
+  check('Default temperature', await page.locator('#temperature').inputValue() === 'około 0°C', await page.locator('#temperature').inputValue())
+  check('Default pace', await page.locator('#pace').inputValue() === 'umiarkowane', await page.locator('#pace').inputValue())
+  check('Default mode', await page.locator('#mode').inputValue() === 'jedna kurtka', await page.locator('#mode').inputValue())
+  const chipStates = await page.locator('.toggle-chip').evaluateAll(nodes => nodes.map(node => node.classList.contains('on')))
+  check('Default toggles exact', JSON.stringify(chipStates) === JSON.stringify([false, true, true, false]), JSON.stringify(chipStates))
+
+  await page.locator('#pace').selectOption({ label: 'bardzo szybkie' })
+  await page.locator('#temperature').selectOption({ label: 'lekki mróz' })
+  const changedTop3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
+  check('Selector changes TOP3', JSON.stringify(changedTop3) !== JSON.stringify(expectedTop3), JSON.stringify(changedTop3))
+  await page.locator('#reset').click()
+  const resetTop3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
+  const resetChips = await page.locator('.toggle-chip').evaluateAll(nodes => nodes.map(node => node.classList.contains('on')))
+  check('Reset restores default TOP3', JSON.stringify(resetTop3) === JSON.stringify(expectedTop3), JSON.stringify(resetTop3))
+  check('Reset restores exact default toggles', JSON.stringify(resetChips) === JSON.stringify([false, true, true, false]), JSON.stringify(resetChips))
+
+  await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Nie podoba mi się' }).click()
+  const afterDislike = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
+  check('Dislike alone does not alter technical TOP3', JSON.stringify(afterDislike) === JSON.stringify(expectedTop3), JSON.stringify(afterDislike))
+  await page.locator('#visual').check()
+  const visualTop3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
+  check('Visual opt-in alters shortlist after dislike', !visualTop3.includes(expectedTop3[0]) && JSON.stringify(visualTop3) !== JSON.stringify(expectedTop3), JSON.stringify(visualTop3))
+  const rankingAfterVisual = []
+  for (let i = 1; i <= 20; i++) rankingAfterVisual.push(await page.locator(`[data-testid="rank-${i}"] td`).nth(1).locator('span').innerText())
+  check('Visual preference does not alter base ranking', JSON.stringify(rankingAfterVisual) === JSON.stringify(expectedModels))
+  await page.locator('#reset').click()
+
+  for (let i = 1; i <= 5; i++) await page.locator(`[data-testid="rank-${i}"] .rowcompare`).click()
+  const stickyText = await page.locator('.sticky-compare').innerText()
+  check('Compare selection capped at 4', stickyText.includes('4/4'), stickyText)
+  await page.locator('.sticky-compare').click()
+  await page.waitForSelector('.compare-modal')
+  check('Compare modal shows 4 models', await page.locator('.compare-modal .compare-col').count() === 4, String(await page.locator('.compare-modal .compare-col').count()))
+  const compareText = await page.locator('.compare-modal').innerText()
+  check('Compare includes strengths and limitations', compareText.includes('Mocne strony') && compareText.includes('Ograniczenia'))
+  check('Compare includes status and sources', /potwierdzony/i.test(compareText) && /źródło/i.test(compareText))
+  await page.locator('.compare-modal .modal-close').click()
+
+  await page.locator('#search').fill('Goldwin')
+  check('Search filters to Goldwin', await page.locator('tbody tr[data-testid^="rank-"]:visible').count() === 1 && (await page.locator('tbody tr[data-testid^="rank-"]:visible').innerText()).includes('Goldwin'))
+  await page.locator('#search').fill('')
+
+  await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się' }).click()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-testid="top-card-1"]')
+  const likeClass = await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się' }).getAttribute('class') || ''
+  check('Visual preference persists in localStorage', likeClass.includes('active-like'), likeClass)
+
+  // Force image loading, then validate the ranking's exact 20 product images.
+  await page.evaluate(() => document.querySelectorAll('img').forEach(img => { img.loading = 'eager' }))
+  for (let i = 1; i <= 20; i++) await page.locator(`[data-testid="rank-${i}"]`).scrollIntoViewIfNeeded()
+  await sleep(12000)
+  const imageFailures = []
+  for (let i = 1; i <= 20; i++) {
+    const row = page.locator(`[data-testid="rank-${i}"]`)
+    const img = row.locator('.table-photo img')
+    if (await img.count() !== 1) {
+      imageFailures.push({ rank: i, reason: 'no img element / fallback visible' })
+      continue
+    }
+    const state = await img.evaluate(element => ({ complete: element.complete, width: element.naturalWidth, src: element.currentSrc || element.src }))
+    if (!state.complete || state.width <= 0) imageFailures.push({ rank: i, reason: 'image not loaded', ...state })
+  }
+  check('Ranking images load 20/20', imageFailures.length === 0, JSON.stringify(imageFailures))
+
+  await page.screenshot({ path: 'stage3-e2e-desktop.png', fullPage: true })
+
+  const mobile = await context.newPage()
+  await mobile.setViewportSize({ width: 390, height: 844 })
+  await mobile.goto(URL, { waitUntil: 'domcontentloaded' })
+  await mobile.waitForSelector('.mobile-ranking')
+  check('Mobile ranking has 20 cards', await mobile.locator('.mobile-rank-card').count() === 20, String(await mobile.locator('.mobile-rank-card').count()))
+  const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  check('No page-level mobile horizontal overflow', overflow <= 2, String(overflow))
+  await mobile.screenshot({ path: 'stage3-e2e-mobile.png', fullPage: true })
+  await mobile.close()
+
+  check('No JavaScript page errors', pageErrors.length === 0, JSON.stringify(pageErrors))
+} catch (error) {
+  fail('E2E runner completed', error.stack || String(error))
+} finally {
+  const report = {
+    url: URL,
+    browser: executablePath,
+    pass: results.filter(item => item.status === 'PASS').length,
+    fail: results.filter(item => item.status === 'FAIL').length,
+    results,
+    pageErrors,
+    consoleErrors: consoleErrors.slice(0, 50),
+    failedRequests: failedRequests.slice(0, 100),
+  }
+  writeFileSync('stage3-e2e-report.json', JSON.stringify(report, null, 2))
+  for (const result of results) console.log(`${result.status}: ${result.name}${result.detail ? ` — ${result.detail}` : ''}`)
+  console.log(`E2E SUMMARY: ${report.pass} PASS / ${report.fail} FAIL`)
+  await browser.close()
+  if (report.fail) process.exitCode = 1
+}
