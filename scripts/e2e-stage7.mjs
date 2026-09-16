@@ -78,7 +78,6 @@ try {
     for (let j = 0; j < await cells.count(); j++) {
       const text = (await cells.nth(j).innerText()).trim()
       if (['—', '-', '–'].includes(text)) bareDash.push([i, j, text])
-      // Column 2 is image-only and column 10 is icon-only compare.
       if (!text && ![2, 10].includes(j)) emptyDataCells.push([i, j])
     }
   }
@@ -87,10 +86,11 @@ try {
 
   const badRatings = []
   for (let i = 1; i <= 20; i++) {
-    const rating = page.locator(`[data-testid="numeric-ratings-${i}"]`)
-    const missing = page.locator(`[data-testid="missing-ratings-${i}"]`)
+    const row = page.locator(`[data-testid="rank-${i}"]`)
+    const rating = row.locator(`[data-testid="numeric-ratings-${i}"]`)
+    const missing = row.locator(`[data-testid="missing-ratings-${i}"]`)
     if (await rating.count() !== 1 || await missing.count() !== 0) {
-      badRatings.push({ rank: i, reason: 'missing numeric rating block' })
+      badRatings.push({ rank: i, reason: 'missing numeric rating block in TOP20 row' })
       continue
     }
     const text = (await rating.innerText()).trim()
@@ -153,7 +153,7 @@ try {
   check('Compare includes status and sources', /potwierdzony/i.test(compareText) && /źródło/i.test(compareText))
   check('Compare includes product descriptions', await page.locator('.compare-modal [data-testid="compare-description"]').count() === 4)
   check('Compare includes market price', await page.locator('.compare-modal [data-testid="compare-price"]').count() === 4 && compareText.includes('Średnia cena / widełki') && compareText.includes('16.09.2026'))
-  check('Compare includes numeric ratings for all models', await page.locator('.compare-modal [data-testid^="numeric-ratings-"]').count() === 4)
+  check('Compare includes numeric ratings for all models', await page.locator('.compare-modal .compare-col .metric-row').count() === 28, String(await page.locator('.compare-modal .compare-col .metric-row').count()))
   await page.locator('.compare-modal .modal-close').click()
 
   await page.locator('#search').fill('Goldwin')
@@ -166,7 +166,6 @@ try {
   const likeClass = await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się', exact: true }).getAttribute('class') || ''
   check('Visual preference persists in localStorage', likeClass.includes('active-like'), likeClass)
 
-  // Force all visible image instances to load and verify final rendered pixels, not metadata.
   await page.evaluate(() => document.querySelectorAll('img').forEach(img => { img.loading = 'eager' }))
   for (let i = 1; i <= 20; i++) await page.locator(`[data-testid="rank-${i}"]`).scrollIntoViewIfNeeded()
   await sleep(12000)
