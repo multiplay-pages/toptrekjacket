@@ -19,15 +19,11 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: npm install
-
-      - name: Install Chromium
-        run: sudo apt-get update && sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+        run: npm install --no-audit --no-fund
 
       - name: Run hosted staging E2E
         env:
           STAGE3_URL: https://trek-jacket-finder-kghferlu0-lukaszs-projects-d71b6aef.vercel.app
-          CHROME_BIN: /usr/bin/chromium
         run: npm run e2e:stage3
 
       - name: Upload hosted QA evidence
@@ -35,5 +31,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stage4-hosted-qa-evidence
-          path: stage3-e2e-report.json
+          path: |
+            stage3-e2e-report.json
+            stage3-e2e-desktop.png
+            stage3-e2e-mobile.png
           if-no-files-found: error
+          retention-days: 14
