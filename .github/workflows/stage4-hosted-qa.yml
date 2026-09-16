@@ -14,6 +14,7 @@ env:
   STAGING_BASE_URL: https://trek-jacket-finder-qpjvkp1sb-lukaszs-projects-d71b6aef.vercel.app
   VERCEL_TEAM_ID: team_7hPovBT2iV7GpndA5ssdCTZs
   VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
+  BYPASS_NOTE: Stage 4 hosted QA temporary
 
 jobs:
   hosted-e2e:
@@ -26,68 +27,71 @@ jobs:
           ref: ${{ env.EXPECTED_MAIN_SHA }}
 
       - name: Verify source commit
-        run: |
-          ACTUAL_SHA="$(git rev-parse HEAD)"
-          echo "Expected main: $EXPECTED_MAIN_SHA"
-          echo "Checked out:   $ACTUAL_SHA"
-          test "$ACTUAL_SHA" = "$EXPECTED_MAIN_SHA"
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Validate exact main before hosted QA
+      - name: Install and validate exact main
         run: |
+          npm install --no-audit --no-fund
           npm run validate:data
           npm run validate:ui
           npm run build
           grep -Eq 'src="/assets/[^"]+\.js"' dist/index.html
           grep -Eq 'href="/assets/[^"]+\.css"' dist/index.html
-          if grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' dist/index.html; then
-            echo "External GitHub-hosted runtime asset reference found in local build"
-            exit 1
-          fi
+          ! grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' dist/index.html
 
-      - name: Create temporary automation bypass on QA project
+      - name: Acquire temporary automation bypass on QA project
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$VERCEL_TOKEN"
-          RESPONSE="$(curl -fsS -X PATCH \
+          PROJECT_JSON="$(curl -fsS \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data '{"generate":{"note":"Stage 4 hosted QA temporary"}}' \
-            "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID")"
-          BYPASS="$(node -e 'const j=JSON.parse(process.argv[1]); const v=typeof j.protectionBypass==="string"?j.protectionBypass:j.protectionBypass?.secret; if(!v) process.exit(2); process.stdout.write(v)' "$RESPONSE")"
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_TEAM_ID")"
+          BYPASS="$(node -e '
+            const j=JSON.parse(process.argv[1]); const note=process.argv[2]; const pb=j.protectionBypass||{};
+            const hit=Object.entries(pb).find(([k,v]) => /^[A-Za-z0-9]{32}$/.test(k) && v && v.note===note);
+            if(hit) process.stdout.write(hit[0]);
+          ' "$PROJECT_JSON" "$BYPASS_NOTE")"
+          if [ -z "$BYPASS" ]; then
+            RESPONSE="$(curl -fsS -X PATCH \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data "{\"generate\":{\"note\":\"$BYPASS_NOTE\"}}" \
+              "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID")"
+            BYPASS="$(node -e '
+              const j=JSON.parse(process.argv[1]); const note=process.argv[2]; const pb=j.protectionBypass||{};
+              if(typeof pb === "string") { process.stdout.write(pb); process.exit(0); }
+              const entries=Object.entries(pb);
+              const hit=entries.find(([k,v]) => /^[A-Za-z0-9]{32}$/.test(k) && v && v.note===note) || entries.find(([k]) => /^[A-Za-z0-9]{32}$/.test(k));
+              if(!hit) process.exit(2); process.stdout.write(hit[0]);
+            ' "$RESPONSE" "$BYPASS_NOTE")"
+          fi
+          test -n "$BYPASS"
           echo "::add-mask::$BYPASS"
           echo "VERCEL_AUTOMATION_BYPASS_SECRET=$BYPASS" >> "$GITHUB_ENV"
 
-      - name: Verify hosted HTML and local assets with automation bypass
+      - name: Verify hosted HTML and local assets
         run: |
           set -euo pipefail
           AUTH=(-H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" -H 'x-vercel-set-bypass-cookie: true')
           curl -fsSL "${AUTH[@]}" "$STAGING_BASE_URL/" -o stage4-index.html
-          echo "--- hosted index asset references ---"
           grep -Eo '(src|href)="[^"]+"' stage4-index.html | tee stage4-asset-refs.txt
           grep -Eq 'src="/assets/[^"]+\.js"' stage4-index.html
           grep -Eq 'href="/assets/[^"]+\.css"' stage4-index.html
-          if grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' stage4-index.html; then
-            echo "External GitHub-hosted runtime asset reference found in hosted index"
-            exit 1
-          fi
+          ! grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' stage4-index.html
           JS_PATH="$(grep -Eo 'src="/assets/[^"]+\.js"' stage4-index.html | head -1 | sed -E 's/^src="([^"]+)"$/\1/')"
           CSS_PATH="$(grep -Eo 'href="/assets/[^"]+\.css"' stage4-index.html | head -1 | sed -E 's/^href="([^"]+)"$/\1/')"
           JS_STATUS="$(curl -sS -L "${AUTH[@]}" -o /tmp/stage4-app.js -w '%{http_code}' "$STAGING_BASE_URL$JS_PATH")"
           CSS_STATUS="$(curl -sS -L "${AUTH[@]}" -o /tmp/stage4-app.css -w '%{http_code}' "$STAGING_BASE_URL$CSS_PATH")"
           printf 'deployment=%s\nbase=%s\njs=%s http=%s bytes=%s\ncss=%s http=%s bytes=%s\n' \
             "$STAGING_DEPLOYMENT_ID" "$STAGING_BASE_URL" "$JS_PATH" "$JS_STATUS" "$(wc -c </tmp/stage4-app.js)" "$CSS_PATH" "$CSS_STATUS" "$(wc -c </tmp/stage4-app.css)" | tee stage4-http-evidence.txt
-          test "$JS_STATUS" = "200"
-          test "$CSS_STATUS" = "200"
+          test "$JS_STATUS" = 200
+          test "$CSS_STATUS" = 200
           test -s /tmp/stage4-app.js
           test -s /tmp/stage4-app.css
 
@@ -101,8 +105,7 @@ jobs:
           const needle = "const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })\n"
           const injected = needle + `if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {\n  const protectedOrigin = new URL(URL).origin\n  await context.route(protectedOrigin + '/**', async route => {\n    await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET, 'x-vercel-set-bypass-cookie': 'true' } })\n  })\n}\n`
           if (!src.includes(needle)) throw new Error('Expected Stage 3 browser context hook not found')
-          src = src.replace(needle, injected)
-          writeFileSync(path, src)
+          writeFileSync(path, src.replace(needle, injected))
           NODE
 
       - name: Run Stage 3 35-check suite against hosted staging
@@ -117,42 +120,23 @@ jobs:
           node --input-type=module <<'NODE' | tee stage4-browser-diagnostics.json
           import { chromium } from 'playwright-core'
           import { existsSync } from 'node:fs'
-
-          const browserCandidates = [
-            process.env.CHROME_BIN,
-            '/usr/bin/google-chrome',
-            '/usr/bin/google-chrome-stable',
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser',
-          ].filter(Boolean)
-          const executablePath = browserCandidates.find(path => existsSync(path))
-          if (!executablePath) throw new Error('No Chrome/Chromium')
-
-          const badResponses = []
-          const consoleErrors = []
-          const failedRequests = []
-          const pageErrors = []
-          const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
-          const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-          const protectedOrigin = new URL(process.env.STAGE3_URL).origin
-          await context.route(protectedOrigin + '/**', async route => {
-            await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET, 'x-vercel-set-bypass-cookie': 'true' } })
-          })
-          const page = await context.newPage()
-          page.on('response', response => {
-            if (response.status() >= 400) badResponses.push({ status: response.status(), url: response.url(), resourceType: response.request().resourceType() })
-          })
-          page.on('console', message => {
-            if (message.type() === 'error') consoleErrors.push({ text: message.text(), location: message.location() })
-          })
-          page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || '' }))
-          page.on('pageerror', error => pageErrors.push(String(error)))
-
-          await page.goto(process.env.STAGE3_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
-          await page.waitForSelector('[data-testid="scenario-selector"]', { timeout: 15000 })
+          const browserCandidates=[process.env.CHROME_BIN,'/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser'].filter(Boolean)
+          const executablePath=browserCandidates.find(path=>existsSync(path)); if(!executablePath) throw new Error('No Chrome/Chromium')
+          const badResponses=[],consoleErrors=[],failedRequests=[],pageErrors=[]
+          const browser=await chromium.launch({executablePath,headless:true,args:['--no-sandbox']})
+          const context=await browser.newContext({viewport:{width:1440,height:1000}})
+          const protectedOrigin=new URL(process.env.STAGE3_URL).origin
+          await context.route(protectedOrigin+'/**',async route=>route.continue({headers:{...route.request().headers(),'x-vercel-protection-bypass':process.env.VERCEL_AUTOMATION_BYPASS_SECRET,'x-vercel-set-bypass-cookie':'true'}}))
+          const page=await context.newPage()
+          page.on('response',r=>{if(r.status()>=400) badResponses.push({status:r.status(),url:r.url(),resourceType:r.request().resourceType()})})
+          page.on('console',m=>{if(m.type()==='error') consoleErrors.push({text:m.text(),location:m.location()})})
+          page.on('requestfailed',r=>failedRequests.push({url:r.url(),error:r.failure()?.errorText||''}))
+          page.on('pageerror',e=>pageErrors.push(String(e)))
+          await page.goto(process.env.STAGE3_URL,{waitUntil:'domcontentloaded',timeout:30000})
+          await page.waitForSelector('[data-testid="scenario-selector"]',{timeout:15000})
           await page.waitForTimeout(5000)
-          console.log(JSON.stringify({ badResponses, consoleErrors, failedRequests, pageErrors }, null, 2))
-          if (badResponses.length || consoleErrors.length || failedRequests.length || pageErrors.length) process.exitCode = 1
+          console.log(JSON.stringify({badResponses,consoleErrors,failedRequests,pageErrors},null,2))
+          if(badResponses.length||consoleErrors.length||failedRequests.length||pageErrors.length) process.exitCode=1
           await browser.close()
           NODE
 
