@@ -1,4 +1,4 @@
-name: Stage 6 corrected production deploy
+name: Stage 6 production alias switch
 
 on:
   push:
@@ -8,58 +8,23 @@ permissions:
   contents: read
 
 env:
-  SOURCE_SHA: 2efd033b33efecdaf87d5f37ae7f12a64397e849
-  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
-  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  DEPLOYMENT_URL: trek-jacket-finder-9ftga3r5y-lukaszs-projects-d71b6aef.vercel.app
+  PRODUCTION_ALIAS: trek-jacket-finder.vercel.app
 
 jobs:
-  corrected-production:
+  alias-production:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Checkout exact validated main
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_SHA }}
-
-      - name: Verify source SHA
-        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Revalidate exact source
-        run: |
-          npm install --no-audit --no-fund
-          npm run validate:data
-          npm run validate:ui
-          npm run build
-
-      - name: Deploy corrected Vite build to production
+      - name: Point canonical production alias to corrected deployment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           test -n "$VERCEL_TOKEN"
-          mkdir -p .vercel
-          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
-          cat > vercel.json <<'JSON'
-          {
-            "$schema": "https://openapi.vercel.sh/vercel.json",
-            "framework": "vite",
-            "installCommand": "npm install --no-audit --no-fund",
-            "buildCommand": "npm run build",
-            "outputDirectory": "dist"
-          }
-          JSON
           npm install --global vercel@59.16.0 --no-audit --no-fund
-          URL="$(vercel deploy --prod --yes --token="$VERCEL_TOKEN")"
-          echo "STAGE6_CORRECTED_PRODUCTION_URL=$URL" | tee stage6-corrected-production-url.txt
-
-      - name: Upload production URL
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage6-corrected-production-url
-          path: stage6-corrected-production-url.txt
-          retention-days: 2
+          vercel alias set "$DEPLOYMENT_URL" "$PRODUCTION_ALIAS" --token="$VERCEL_TOKEN"
