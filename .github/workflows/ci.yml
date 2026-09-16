@@ -1,4 +1,4 @@
-name: Stage 2 data + build check
+name: Trek Jacket Finder checks
 
 on:
   push:
@@ -23,5 +23,36 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Validate authoritative product data
         run: npm run validate:data
+      - name: Validate Stage 3 UI integrity
+        run: npm run validate:ui
       - name: Build
         run: npm run build
+      - name: Run Stage 3 browser E2E
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > stage3-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill $PREVIEW_PID || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "Preview server did not become ready"
+              cat stage3-preview.log
+              exit 1
+            fi
+            sleep 1
+          done
+          npm run e2e:stage3
+      - name: Upload Stage 3 E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3-e2e-evidence
+          path: |
+            stage3-e2e-report.json
+            stage3-e2e-desktop.png
+            stage3-e2e-mobile.png
+            stage3-preview.log
+          if-no-files-found: ignore
+          retention-days: 14
