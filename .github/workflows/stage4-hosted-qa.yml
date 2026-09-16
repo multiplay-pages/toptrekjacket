@@ -11,7 +11,7 @@ permissions:
 env:
   EXPECTED_MAIN_SHA: 47e954aec64b23abf54316835704bf9b00e1f422
   STAGING_DEPLOYMENT_ID: dpl_GCAYnGvLccFno9RPJgNFMkMfMRAv
-  STAGING_SHARE_URL: https://trek-jacket-finder-d19bt5a7v-lukaszs-projects-d71b6aef.vercel.app/?_vercel_share=X4TnzyaBA4lUdgZXypZQzZJNRJ1nBySb
+  STAGING_SHARE_URL: https://trek-jacket-finder-d19bt5a7v-lukaszs-projects-d71b6aef.vercel.app/?_vercel_share=Vj5ttYIOX55GcamQ6gyb7Doi3q3OJ3XL
 
 jobs:
   hosted-e2e:
