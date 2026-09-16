@@ -1,0 +1,116 @@
+name: Stage 7 hosted QA
+
+on:
+  push:
+    branches: [stage-7-hosted-qa-control]
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: 2ad9a3898c3fb1cd96083d8e9089186829937900
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
+
+jobs:
+  hosted-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+      - run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install validate and build
+        run: |
+          npm install --no-audit --no-fund
+          npm run validate:data
+          npm run validate:ui
+          npm run build
+      - name: Prepare prebuilt output
+        run: |
+          mkdir -p .vercel/output/static .vercel
+          cp -R dist/. .vercel/output/static/
+          printf '{"version":3}' > .vercel/output/config.json
+          printf '{"orgId":"%s","projectId":"%s"}' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+      - name: Deploy isolated QA preview
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --yes vercel@latest deploy --prebuilt --yes --token="$VERCEL_TOKEN" > stage7-preview-url.txt
+          PREVIEW_URL=$(tail -n 1 stage7-preview-url.txt | tr -d '\r')
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+      - name: Create temporary automation bypass
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          SECRET=$(openssl rand -hex 16)
+          echo "::add-mask::$SECRET"
+          curl -fsS -X PATCH "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_ORG_ID" -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" -d "{\"generate\":{\"secret\":\"$SECRET\",\"note\":\"Stage 7 hosted QA temporary\"}}" > bypass-response.json
+          echo "BYPASS_SECRET=$SECRET" >> "$GITHUB_ENV"
+      - name: Verify hosted assets
+        run: |
+          HTML=$(curl -fsS -H "x-vercel-protection-bypass: $BYPASS_SECRET" -H "x-vercel-set-bypass-cookie: true" "$PREVIEW_URL")
+          echo "$HTML" > hosted-index.html
+          JS=$(printf '%s' "$HTML" | grep -oE 'src="/assets/[^"]+\.js"' | head -1 | cut -d'"' -f2)
+          CSS=$(printf '%s' "$HTML" | grep -oE 'href="/assets/[^"]+\.css"' | head -1 | cut -d'"' -f2)
+          test -n "$JS" && test -n "$CSS"
+          curl -fsS -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$PREVIEW_URL$JS" -o hosted-app.js
+          curl -fsS -H "x-vercel-protection-bypass: $BYPASS_SECRET" "$PREVIEW_URL$CSS" -o hosted-app.css
+          test -s hosted-app.js && test -s hosted-app.css
+      - name: Enable protection bypass in browser runner
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/e2e-stage7.mjs'); s=p.read_text()
+          old="const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })"
+          new="""const context = await browser.newContext({\n  viewport: { width: 1440, height: 1000 },\n  extraHTTPHeaders: process.env.VERCEL_AUTOMATION_BYPASS_SECRET ? {\n    'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,\n    'x-vercel-set-bypass-cookie': 'true',\n  } : {},\n})"""
+          if old not in s: raise SystemExit('browser context anchor not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Full Stage 7 hosted E2E
+        env:
+          STAGE3_URL: ${{ env.PREVIEW_URL }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ env.BYPASS_SECRET }}
+        run: npm run e2e:stage7
+      - name: Hard browser diagnostics
+        env:
+          TARGET_URL: ${{ env.PREVIEW_URL }}
+          SECRET: ${{ env.BYPASS_SECRET }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright-core'
+          const browser=await chromium.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']})
+          const context=await browser.newContext({extraHTTPHeaders:{'x-vercel-protection-bypass':process.env.SECRET,'x-vercel-set-bypass-cookie':'true'}})
+          const page=await context.newPage(); const d={badResponses:[],consoleErrors:[],failedRequests:[],pageErrors:[]}
+          page.on('response',r=>{if(r.status()>=400)d.badResponses.push({status:r.status(),url:r.url()})})
+          page.on('console',m=>{if(m.type()==='error')d.consoleErrors.push(m.text())})
+          page.on('requestfailed',r=>d.failedRequests.push({url:r.url(),error:r.failure()?.errorText||''}))
+          page.on('pageerror',e=>d.pageErrors.push(String(e)))
+          await page.goto(process.env.TARGET_URL,{waitUntil:'networkidle',timeout:30000})
+          await page.evaluate(()=>document.querySelectorAll('img').forEach(img=>{img.loading='eager'}))
+          await page.locator('[data-testid="full-data-section"]').scrollIntoViewIfNeeded(); await page.waitForTimeout(12000)
+          console.log(JSON.stringify(d,null,2)); await browser.close()
+          if(Object.values(d).some(items=>items.length)) process.exit(1)
+          NODE
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage7-hosted-evidence
+          path: |
+            stage7-e2e-report.json
+            stage7-e2e-desktop.png
+            stage7-e2e-mobile.png
+            stage7-preview-url.txt
+            hosted-index.html
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Revoke temporary bypass
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "${BYPASS_SECRET:-}" ]; then curl -fsS -X PATCH "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_ORG_ID" -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" -d "{\"revoke\":{\"secret\":\"$BYPASS_SECRET\",\"regenerate\":false}}" >/dev/null || true; fi
