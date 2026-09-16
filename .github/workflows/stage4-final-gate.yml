@@ -108,7 +108,7 @@ jobs:
           const path = 'stage4-e2e-auth.mjs'
           let src = readFileSync(path, 'utf8')
           const needle = "const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })\n"
-          const injected = needle + `if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {\n  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET\n  const seed = new URL(URL)\n  seed.searchParams.set('x-vercel-protection-bypass', bypass)\n  await context.request.get(seed.toString(), { headers: { 'x-vercel-set-bypass-cookie': 'true' }, maxRedirects: 0 })\n  const protectedOrigin = new URL(URL).origin\n  await context.route(protectedOrigin + '/**', async route => {\n    await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': bypass } })\n  })\n}\n`
+          const injected = needle + `if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {\n  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET\n  const seed = new globalThis.URL(URL)\n  seed.searchParams.set('x-vercel-protection-bypass', bypass)\n  await context.request.get(seed.toString(), { headers: { 'x-vercel-set-bypass-cookie': 'true' }, maxRedirects: 0 })\n  const protectedOrigin = new globalThis.URL(URL).origin\n  await context.route(protectedOrigin + '/**', async route => {\n    await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': bypass } })\n  })\n}\n`
           if (!src.includes(needle)) throw new Error('Stage 3 E2E context hook not found')
           writeFileSync(path, src.replace(needle, injected))
           NODE
