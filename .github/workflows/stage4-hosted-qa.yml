@@ -79,6 +79,51 @@ jobs:
           STAGE3_URL: ${{ env.STAGING_SHARE_URL }}
         run: npm run e2e:stage3
 
+      - name: Diagnose browser console and HTTP errors
+        env:
+          STAGE3_URL: ${{ env.STAGING_SHARE_URL }}
+        run: |
+          node --input-type=module <<'NODE' | tee stage4-browser-diagnostics.json
+          import { chromium } from 'playwright-core'
+          import { existsSync } from 'node:fs'
+
+          const browserCandidates = [
+            process.env.CHROME_BIN,
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+          ].filter(Boolean)
+          const executablePath = browserCandidates.find(path => existsSync(path))
+          if (!executablePath) throw new Error('No Chrome/Chromium')
+
+          const badResponses = []
+          const consoleErrors = []
+          const failedRequests = []
+          const pageErrors = []
+          const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] })
+          const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+          const page = await context.newPage()
+          page.on('response', response => {
+            if (response.status() >= 400) badResponses.push({
+              status: response.status(),
+              url: response.url(),
+              resourceType: response.request().resourceType(),
+            })
+          })
+          page.on('console', message => {
+            if (message.type() === 'error') consoleErrors.push({ text: message.text(), location: message.location() })
+          })
+          page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || '' }))
+          page.on('pageerror', error => pageErrors.push(String(error)))
+
+          await page.goto(process.env.STAGE3_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+          await page.waitForSelector('[data-testid="scenario-selector"]', { timeout: 15000 })
+          await page.waitForTimeout(5000)
+          console.log(JSON.stringify({ badResponses, consoleErrors, failedRequests, pageErrors }, null, 2))
+          await browser.close()
+          NODE
+
       - name: Upload Stage 4 hosted QA evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -91,5 +136,6 @@ jobs:
             stage4-index.html
             stage4-asset-refs.txt
             stage4-http-evidence.txt
+            stage4-browser-diagnostics.json
           if-no-files-found: ignore
           retention-days: 14
