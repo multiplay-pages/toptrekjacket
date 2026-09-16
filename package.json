@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "validate:data": "node scripts/validate-data.mjs",
     "build": "tsc -b && vite build",
+    "check": "npm run validate:data && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
