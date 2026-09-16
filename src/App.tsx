@@ -125,9 +125,9 @@ function SourceLinks({ jacket }: { jacket: Jacket }) {
 function RatingSummary({ jacket }: { jacket: Jacket }) {
   if (jacket.breathability == null) {
     return (
-      <div className="descriptive-ranking-note" data-testid={`descriptive-ratings-${jacket.rank}`}>
-        <b>Ranking opisowy</b>
-        <span>W audycie nie przypisano temu modelowi ocen 1–5. Dane techniczne i opisowe pozostają kompletne.</span>
+      <div className="descriptive-ranking-note" data-testid={`missing-ratings-${jacket.rank}`}>
+        <b>Brak ocen użytkowych — błąd kompletności</b>
+        <span>Każdy model powinien mieć pełny zestaw ocen 1–5.</span>
       </div>
     )
   }
@@ -261,9 +261,9 @@ function App() {
           </div>
           <div className="hero-stats">
             <div><strong>20</strong><span>modeli w rankingu</span></div>
-            <div><strong>20</strong><span>zweryfikowanych źródeł zdjęć</span></div>
-            <div><strong>20–50 km</strong><span>główny zakres decyzyjny</span></div>
-            <div><strong>100 km</strong><span>tylko informacyjnie</span></div>
+            <div><strong>20/20</strong><span>ocen użytkowych</span></div>
+            <div><strong>20/20</strong><span>zweryfikowanych źródeł zdjęć + fallback</span></div>
+            <div><strong>16.09</strong><span>snapshot cen rynkowych</span></div>
           </div>
         </div>
       </header>
@@ -323,7 +323,7 @@ function App() {
             <div>
               <span className="eyebrow">TWOJA SHORTLISTA</span>
               <h2>TOP 3 dla wybranego scenariusza</h2>
-              <p className="sub">Selekcja regułowa oparta na werdyktach audytu, bez udawania laboratoryjnej precyzji.</p>
+              <p className="sub">Selekcja regułowa oparta na werdyktach audytu; oceny 1–5 są użytkową syntezą tego audytu, a nie pomiarami laboratoryjnymi.</p>
             </div>
             {compareIds.length >= 2 && (
               <button id="openCompare" className="compare-btn compare-floating" onClick={() => setCompareOpen(true)}>
@@ -357,6 +357,11 @@ function App() {
                       <span><small>Masa</small><b>{jacket.weight.text}</b></span>
                       <span><small>Izolacja</small><b>{jacket.insulation.text}</b></span>
                       <span data-testid="top-gsm"><small>Gramatura / status</small><b>{jacket.insulationWeight.text}</b></span>
+                      <span data-testid="top-price"><small>Średnia cena / widełki</small><b>{jacket.marketPrice}</b></span>
+                    </div>
+                    <div className="top-ratings">
+                      <small>Oceny użytkowe 1–5</small>
+                      <RatingSummary jacket={jacket} />
                     </div>
                     <p className="use-profile"><b>Najlepszy profil:</b> {jacket.useProfile}</p>
                     <div className="strength-list">
@@ -386,7 +391,7 @@ function App() {
             <div>
               <span className="eyebrow">RANKING BAZOWY</span>
               <h2>Globalny TOP 20</h2>
-              <p className="sub">Kolejność z audytu pozostaje stała. Dla pozycji 11–20 nie dopisujemy ocen 1–5 — zamiast pustych kolumn pokazujemy jawnie ranking opisowy i pełne dane techniczne.</p>
+              <p className="sub">Kolejność z audytu pozostaje stała. Wszystkie 20 modeli ma ten sam zestaw ocen użytkowych 1–5. Są to oceny redakcyjne dla tego profilu użycia, nie deklaracje producentów; 100 km pozostaje kryterium informacyjnym.</p>
             </div>
           </div>
 
@@ -402,11 +407,11 @@ function App() {
           </div>
 
           <div className="ranking-table-wrap">
-            <table className="ranking-table stage6-ranking-table">
+            <table className="ranking-table stage7-ranking-table">
               <thead>
                 <tr>
                   <th>#</th><th>Model</th><th>Zdjęcie</th><th>Masa</th><th>Izolacja</th>
-                  <th>Gramatura / status</th><th>Oceny użytkowe</th><th>Status</th><th>Pełne dane</th><th>Porównaj</th>
+                  <th>Gramatura / status</th><th>Średnia cena / widełki</th><th>Oceny użytkowe</th><th>Status</th><th>Pełne dane</th><th>Porównaj</th>
                 </tr>
               </thead>
               <tbody>
@@ -424,6 +429,10 @@ function App() {
                     <td className="table-gsm">
                       <span>{jacket.insulationWeight.text}</span>
                       <StatusBadge status={jacket.insulationWeight.status} />
+                    </td>
+                    <td className="table-market-price" data-testid={`market-price-${jacket.rank}`}>
+                      <b>{jacket.marketPrice}</b>
+                      <small>sprawdzono {jacket.marketPriceCheckedAt}</small>
                     </td>
                     <td><RatingSummary jacket={jacket} /></td>
                     <td><StatusBadge status={jacket.dataStatus} /></td>
@@ -446,10 +455,11 @@ function App() {
                     <span><small>Masa</small>{jacket.weight.text}</span>
                     <span><small>Izolacja</small>{jacket.insulation.text}</span>
                     <span className="mobile-gsm"><small>Gramatura / status</small>{jacket.insulationWeight.text}</span>
+                    <span className="mobile-market-price"><small>Średnia cena / widełki</small>{jacket.marketPrice}<br /><small>sprawdzono {jacket.marketPriceCheckedAt}</small></span>
                     {jacket.breathability != null ? (
-                      <span><small>Oceny</small>Oddych. {jacket.breathability}/5 · Wiatr {jacket.wind}/5 · Plecak {jacket.backpack}/5 · 50 km {jacket.km50}/5</span>
+                      <span className="mobile-ratings"><small>Oceny użytkowe</small>Oddych. {jacket.breathability}/5 · Wiatr {jacket.wind}/5 · Plecak {jacket.backpack}/5 · Las {jacket.forest}/5 · 20 km {jacket.km20}/5 · 50 km {jacket.km50}/5</span>
                     ) : (
-                      <span className="mobile-descriptive-note"><small>Oceny</small>Ranking opisowy — bez ocen 1–5</span>
+                      <span className="mobile-descriptive-note"><small>Oceny</small>Brak ocen — błąd kompletności</span>
                     )}
                   </div>
                   <div className="mobile-actions">
@@ -466,8 +476,8 @@ function App() {
           <div className="section-title-row">
             <div>
               <span className="eyebrow">DATA PACK 20/20</span>
-              <h2>Pełne opisy i status dowodów</h2>
-              <p className="sub">Każdy model ma jawny opis konstrukcji, body mappingu, gramatury lub przyczyny jej braku, mocne i słabe strony oraz źródła.</p>
+              <h2>Pełne opisy, oceny i status dowodów</h2>
+              <p className="sub">Każdy model ma ten sam układ: technikalia, oceny użytkowe, średnią cenę/widełki z datą sprawdzenia, mocne i słabe strony oraz źródła.</p>
             </div>
           </div>
           <div className="details-grid">
@@ -478,7 +488,7 @@ function App() {
                   <span className="detail-summary-main">
                     <span><b>{jacket.brand}</b> {jacket.model}</span>
                     <small data-testid={`detail-summary-specs-${jacket.rank}`}>
-                      {jacket.weight.text} · {jacket.insulation.text} · {jacket.insulationWeight.text}
+                      {jacket.weight.text} · {jacket.insulation.text} · {jacket.insulationWeight.text} · {jacket.marketPrice}
                     </small>
                   </span>
                   <StatusBadge status={jacket.dataStatus} />
@@ -494,8 +504,13 @@ function App() {
                       <div><dt>Konstrukcja</dt><dd>{jacket.construction}</dd></div>
                       <div><dt>Body mapping</dt><dd>{jacket.bodyMapping}</dd></div>
                       <div><dt>Profil użycia</dt><dd>{jacket.useProfile}</dd></div>
-                      <div><dt>Cena / referencja</dt><dd>{jacket.priceReference}</dd></div>
+                      <div data-testid={`detail-market-price-${jacket.rank}`}><dt>Średnia cena / widełki</dt><dd><b>{jacket.marketPrice}</b><br /><small>Snapshot rynku: {jacket.marketPriceCheckedAt}. {jacket.priceReference}</small></dd></div>
                     </dl>
+                    <div className="detail-ratings" data-testid={`detail-ratings-${jacket.rank}`}>
+                      <h4>Oceny użytkowe 1–5</h4>
+                      <p>Redakcyjna synteza audytu dla tego profilu użytkowania; nie są to pomiary laboratoryjne producenta.</p>
+                      <RatingSummary jacket={jacket} />
+                    </div>
                     <div className="pros-cons">
                       <div><h4>Mocne strony</h4><ul>{jacket.strengths.map(item => <li key={item}>{item}</li>)}</ul></div>
                       <div><h4>Ograniczenia</h4><ul>{jacket.weaknesses.map(item => <li key={item}>{item}</li>)}</ul></div>
@@ -528,7 +543,7 @@ function App() {
 
       <footer>
         <b>Trek Jacket Finder</b>
-        <p>Dane produktowe: autorytatywny DATA PACK 15.09.2026. Ranking bazowy: audyt 14.09.2026. Etap 6 rozwija prezentację danych bez zmiany rankingu, selektora ani faktów źródłowych.</p>
+        <p>Dane techniczne: DATA PACK 15.09.2026. Ranking bazowy: audyt 14.09.2026. Oceny użytkowe 1–5 są redakcyjną syntezą audytu. Ceny są snapshotem rynku z 16.09.2026 i mogą się zmieniać wraz z promocjami, kolorem i rozmiarem.</p>
       </footer>
 
       {compareIds.length > 0 && !compareOpen && (
@@ -541,7 +556,7 @@ function App() {
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Porównanie kurtek">
           <div className="compare-modal">
             <button className="modal-close" onClick={() => setCompareOpen(false)} aria-label="Zamknij porównanie"><X size={18} /></button>
-            <div className="compare-header"><div><span className="eyebrow">PORÓWNANIE 2–4 MODELI</span><h2>Porównaj fakty, nie same punkty</h2></div></div>
+            <div className="compare-header"><div><span className="eyebrow">PORÓWNANIE 2–4 MODELI</span><h2>Porównaj fakty, ceny i oceny użytkowe</h2></div></div>
             <div className="compare-scroll">
               <div className="compare-grid" style={{ gridTemplateColumns: `repeat(${compareJackets.length}, minmax(230px, 1fr))` }}>
                 {compareJackets.map(jacket => (
@@ -558,12 +573,12 @@ function App() {
                       <div><dt>Konstrukcja</dt><dd>{jacket.construction}</dd></div>
                       <div><dt>Body mapping</dt><dd>{jacket.bodyMapping}</dd></div>
                       <div><dt>Profil</dt><dd>{jacket.useProfile}</dd></div>
-                      <div data-testid="compare-price"><dt>Cena / referencja</dt><dd>{jacket.priceReference}</dd></div>
+                      <div data-testid="compare-price"><dt>Średnia cena / widełki</dt><dd><b>{jacket.marketPrice}</b><br /><small>sprawdzono {jacket.marketPriceCheckedAt}</small></dd></div>
                     </dl>
                     <div className="metric-list">
                       {jacket.breathability == null ? (
                         <p className="no-rating-note">
-                          <b>Ranking opisowy.</b> Nie przypisano ocen liczbowych 1–5 w audycie dla tej pozycji. Dane opisowe pozostają kompletne.
+                          <b>Brak ocen użytkowych.</b> Ten stan oznacza błąd kompletności danych Stage 7.
                         </p>
                       ) : (
                         RATING_LABELS.map(([key, label]) => {
