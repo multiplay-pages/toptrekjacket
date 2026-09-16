@@ -1,26 +1,18 @@
 name: Stage 4 hosted staging QA
 
 on:
-  workflow_dispatch:
-    inputs:
-      expected_main_sha:
-        description: Exact main commit represented by the staging deployment
-        required: true
-        default: 926452d67ed4c9ea06d29e848974995ffdca509f
-      staging_deployment_id:
-        description: Vercel QA preview deployment ID
-        required: true
-      staging_share_url:
-        description: Authenticated/shareable Vercel preview URL
-        required: true
+  push:
+    branches:
+      - stage-4-hosted-qa
 
 permissions:
   contents: read
 
 env:
-  EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
-  STAGING_DEPLOYMENT_ID: ${{ inputs.staging_deployment_id }}
-  STAGING_SHARE_URL: ${{ inputs.staging_share_url }}
+  EXPECTED_MAIN_SHA: 926452d67ed4c9ea06d29e848974995ffdca509f
+  STAGING_DEPLOYMENT_ID: dpl_7e6uuGp24tCMFPAfqU9RSVdDzUGJ
+  STAGING_BASE_URL: https://trek-jacket-finder-qpjvkp1sb-lukaszs-projects-d71b6aef.vercel.app
+  VERCEL_TEAM_ID: team_7hPovBT2iV7GpndA5ssdCTZs
 
 jobs:
   hosted-e2e:
@@ -59,10 +51,25 @@ jobs:
             exit 1
           fi
 
+      - name: Create temporary Vercel share URL securely
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          RESPONSE="$(curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"ttl":7200}' \
+            "https://api.vercel.com/aliases/$STAGING_DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID")"
+          BYPASS="$(node -e 'const j=JSON.parse(process.argv[1]); if(!j.value) process.exit(2); process.stdout.write(j.value)' "$RESPONSE")"
+          echo "::add-mask::$BYPASS"
+          echo "STAGING_SHARE_URL=$STAGING_BASE_URL/?_vercel_share=$BYPASS" >> "$GITHUB_ENV"
+
       - name: Verify hosted HTML and local assets over authenticated preview
         run: |
           set -euo pipefail
-          BASE_URL="$(printf '%s' "$STAGING_SHARE_URL" | sed -E 's#^(https?://[^/]+).*$#\1#')"
+          BASE_URL="$STAGING_BASE_URL"
           curl -fsSL -c stage4-cookies.txt -b stage4-cookies.txt "$STAGING_SHARE_URL" -o stage4-index.html
           echo "--- hosted index asset references ---"
           grep -Eo '(src|href)="[^"]+"' stage4-index.html | tee stage4-asset-refs.txt
