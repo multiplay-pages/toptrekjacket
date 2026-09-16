@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "validate:data": "node scripts/validate-data.mjs",
+    "validate:ui": "node scripts/validate-ui.mjs",
     "build": "tsc -b && vite build",
-    "check": "npm run validate:data && npm run build",
+    "check": "npm run validate:data && npm run validate:ui && npm run build",
     "preview": "vite preview"
   },
   "dependencies": {
