@@ -47,6 +47,15 @@ const RATING_LABELS: Array<[RatingKey, string]> = [
   ['km100', '100 km'],
 ]
 
+const TABLE_RATING_LABELS: Array<[RatingKey, string]> = [
+  ['breathability', 'Oddych.'],
+  ['wind', 'Wiatr'],
+  ['backpack', 'Plecak'],
+  ['forest', 'Las'],
+  ['km20', '20 km'],
+  ['km50', '50 km'],
+]
+
 const readStoredSet = (key: string) => {
   if (typeof window === 'undefined') return new Set<string>()
   try {
@@ -56,9 +65,6 @@ const readStoredSet = (key: string) => {
     return new Set<string>()
   }
 }
-
-const ratingText = (value?: number) =>
-  value == null ? 'Nie przypisano oceny liczbowej w audycie.' : `${value}/5`
 
 function StatusBadge({ status }: { status: EvidenceStatus }) {
   return <span className={`status-badge status-${status}`}>{STATUS_LABELS[status]}</span>
@@ -112,6 +118,28 @@ function SourceLinks({ jacket }: { jacket: Jacket }) {
           Źródło zdjęcia: {imageMeta.imageSourceLabel} <ExternalLink size={12} />
         </a>
       )}
+    </div>
+  )
+}
+
+function RatingSummary({ jacket }: { jacket: Jacket }) {
+  if (jacket.breathability == null) {
+    return (
+      <div className="descriptive-ranking-note" data-testid={`descriptive-ratings-${jacket.rank}`}>
+        <b>Ranking opisowy</b>
+        <span>W audycie nie przypisano temu modelowi ocen 1–5. Dane techniczne i opisowe pozostają kompletne.</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rating-summary" data-testid={`numeric-ratings-${jacket.rank}`}>
+      {TABLE_RATING_LABELS.map(([key, label]) => (
+        <span key={key}>
+          <small>{label}</small>
+          <b>{jacket[key]}/5</b>
+        </span>
+      ))}
     </div>
   )
 }
@@ -212,6 +240,7 @@ function App() {
           <div className="nav-links">
             <a href="#selector">Selektor</a>
             <a href="#ranking">TOP 20</a>
+            <a href="#full-data">Pełne dane</a>
             <a href="#system">System warstwowy</a>
           </div>
           <a className="nav-cta" href="#selector">Dobierz kurtkę</a>
@@ -324,13 +353,18 @@ function App() {
                     <p className="brand">{jacket.brand}</p>
                     <h3>{jacket.model}</h3>
                     <p>{jacket.description}</p>
-                    <div className="quick-specs">
+                    <div className="quick-specs top-quick-specs">
                       <span><small>Masa</small><b>{jacket.weight.text}</b></span>
                       <span><small>Izolacja</small><b>{jacket.insulation.text}</b></span>
+                      <span data-testid="top-gsm"><small>Gramatura / status</small><b>{jacket.insulationWeight.text}</b></span>
                     </div>
                     <p className="use-profile"><b>Najlepszy profil:</b> {jacket.useProfile}</p>
                     <div className="strength-list">
                       {jacket.strengths.slice(0, 3).map(item => <span key={item}><Check size={13} />{item}</span>)}
+                    </div>
+                    <div className="top-limitations" data-testid="top-limitations">
+                      <b>Najważniejsze ograniczenia</b>
+                      <ul>{jacket.weaknesses.slice(0, 2).map(item => <li key={item}>{item}</li>)}</ul>
                     </div>
                     <div className="preference-buttons">
                       <button className={likes.has(jacket.id) ? 'active-like' : ''} onClick={() => like(jacket.id)}><Heart size={14} /> Podoba mi się</button>
@@ -352,7 +386,7 @@ function App() {
             <div>
               <span className="eyebrow">RANKING BAZOWY</span>
               <h2>Globalny TOP 20</h2>
-              <p className="sub">Kolejność z audytu pozostaje stała. Brak oceny liczbowej dla pozycji 11–20 jest pokazany jawnie, bez pustych pól.</p>
+              <p className="sub">Kolejność z audytu pozostaje stała. Dla pozycji 11–20 nie dopisujemy ocen 1–5 — zamiast pustych kolumn pokazujemy jawnie ranking opisowy i pełne dane techniczne.</p>
             </div>
           </div>
 
@@ -368,28 +402,32 @@ function App() {
           </div>
 
           <div className="ranking-table-wrap">
-            <table className="ranking-table">
+            <table className="ranking-table stage6-ranking-table">
               <thead>
                 <tr>
                   <th>#</th><th>Model</th><th>Zdjęcie</th><th>Masa</th><th>Izolacja</th>
-                  <th>Oddych.</th><th>Wiatr</th><th>Plecak</th><th>Las</th><th>20 km</th><th>50 km</th><th>Status</th><th>Porównaj</th>
+                  <th>Gramatura / status</th><th>Oceny użytkowe</th><th>Status</th><th>Pełne dane</th><th>Porównaj</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(jacket => (
                   <tr key={jacket.id} data-testid={`rank-${jacket.rank}`} className={dislikes.has(jacket.id) ? 'row-disliked' : ''}>
                     <td><b>{jacket.rank}</b></td>
-                    <td><strong>{jacket.brand}</strong><span>{jacket.model}</span><small>{jacket.useProfile}</small></td>
+                    <td>
+                      <strong>{jacket.brand}</strong>
+                      <span>{jacket.model}</span>
+                      <small>{jacket.useProfile}</small>
+                    </td>
                     <td><div className="table-photo"><ProductPhoto jacket={jacket} compact /></div></td>
                     <td>{jacket.weight.text}</td>
-                    <td><b>{jacket.insulation.text}</b><small>{jacket.insulationWeight.text}</small></td>
-                    <td>{ratingText(jacket.breathability)}</td>
-                    <td>{ratingText(jacket.wind)}</td>
-                    <td>{ratingText(jacket.backpack)}</td>
-                    <td>{ratingText(jacket.forest)}</td>
-                    <td>{ratingText(jacket.km20)}</td>
-                    <td>{ratingText(jacket.km50)}</td>
+                    <td><b>{jacket.insulation.text}</b></td>
+                    <td className="table-gsm">
+                      <span>{jacket.insulationWeight.text}</span>
+                      <StatusBadge status={jacket.insulationWeight.status} />
+                    </td>
+                    <td><RatingSummary jacket={jacket} /></td>
                     <td><StatusBadge status={jacket.dataStatus} /></td>
+                    <td><a className="details-link" href={`#details-${jacket.rank}`}>Pełne dane</a></td>
                     <td><button className={`icon-btn rowcompare ${compareIds.includes(jacket.id) ? 'selected' : ''}`} onClick={() => toggleCompare(jacket.id)} aria-label={`Porównaj ${jacket.brand} ${jacket.model}`}><Scale size={16} /></button></td>
                   </tr>
                 ))}
@@ -407,10 +445,17 @@ function App() {
                   <div className="mobile-spec-grid">
                     <span><small>Masa</small>{jacket.weight.text}</span>
                     <span><small>Izolacja</small>{jacket.insulation.text}</span>
-                    <span><small>Oddych.</small>{ratingText(jacket.breathability)}</span>
-                    <span><small>50 km</small>{ratingText(jacket.km50)}</span>
+                    <span className="mobile-gsm"><small>Gramatura / status</small>{jacket.insulationWeight.text}</span>
+                    {jacket.breathability != null ? (
+                      <span><small>Oceny</small>Oddych. {jacket.breathability}/5 · Wiatr {jacket.wind}/5 · Plecak {jacket.backpack}/5 · 50 km {jacket.km50}/5</span>
+                    ) : (
+                      <span className="mobile-descriptive-note"><small>Oceny</small>Ranking opisowy — bez ocen 1–5</span>
+                    )}
                   </div>
-                  <button className={`compare-btn ${compareIds.includes(jacket.id) ? 'selected' : ''}`} onClick={() => toggleCompare(jacket.id)}><Scale size={14} /> Porównaj</button>
+                  <div className="mobile-actions">
+                    <a className="details-link" href={`#details-${jacket.rank}`}>Pełne dane</a>
+                    <button className={`compare-btn ${compareIds.includes(jacket.id) ? 'selected' : ''}`} onClick={() => toggleCompare(jacket.id)}><Scale size={14} /> Porównaj</button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -427,10 +472,15 @@ function App() {
           </div>
           <div className="details-grid">
             {jackets.map(jacket => (
-              <details className="product-details" key={jacket.id} data-testid={`details-${jacket.rank}`}>
+              <details className="product-details" id={`details-${jacket.rank}`} key={jacket.id} data-testid={`details-${jacket.rank}`}>
                 <summary>
                   <span className="detail-rank">#{jacket.rank}</span>
-                  <span><b>{jacket.brand}</b> {jacket.model}</span>
+                  <span className="detail-summary-main">
+                    <span><b>{jacket.brand}</b> {jacket.model}</span>
+                    <small data-testid={`detail-summary-specs-${jacket.rank}`}>
+                      {jacket.weight.text} · {jacket.insulation.text} · {jacket.insulationWeight.text}
+                    </small>
+                  </span>
                   <StatusBadge status={jacket.dataStatus} />
                 </summary>
                 <div className="detail-body">
@@ -478,7 +528,7 @@ function App() {
 
       <footer>
         <b>Trek Jacket Finder</b>
-        <p>Dane produktowe: autorytatywny DATA PACK 15.09.2026. Ranking bazowy: audyt 14.09.2026. Etap 3 rozwija prezentację bez zmiany rankingu ani logiki selektora.</p>
+        <p>Dane produktowe: autorytatywny DATA PACK 15.09.2026. Ranking bazowy: audyt 14.09.2026. Etap 6 rozwija prezentację danych bez zmiany rankingu, selektora ani faktów źródłowych.</p>
       </footer>
 
       {compareIds.length > 0 && !compareOpen && (
@@ -500,6 +550,7 @@ function App() {
                     <ProductPhoto jacket={jacket} compact />
                     <p className="brand">{jacket.brand}</p><h3>{jacket.model}</h3>
                     <StatusBadge status={jacket.dataStatus} />
+                    <p className="compare-description" data-testid="compare-description">{jacket.description}</p>
                     <dl>
                       <div><dt>Masa</dt><dd>{jacket.weight.text}</dd></div>
                       <div><dt>Izolacja</dt><dd>{jacket.insulation.text}</dd></div>
@@ -507,19 +558,25 @@ function App() {
                       <div><dt>Konstrukcja</dt><dd>{jacket.construction}</dd></div>
                       <div><dt>Body mapping</dt><dd>{jacket.bodyMapping}</dd></div>
                       <div><dt>Profil</dt><dd>{jacket.useProfile}</dd></div>
+                      <div data-testid="compare-price"><dt>Cena / referencja</dt><dd>{jacket.priceReference}</dd></div>
                     </dl>
                     <div className="metric-list">
-                      {RATING_LABELS.map(([key, label]) => {
-                        const value = jacket[key]
-                        return (
-                          <div className="metric-row" key={key}>
-                            <span>{label}</span>
-                            <div className="metric-track">{value != null && <i style={{ width: `${value * 20}%` }} />}</div>
-                            <b>{value == null ? 'n/d' : value}</b>
-                          </div>
-                        )
-                      })}
-                      {jacket.breathability == null && <p className="no-rating-note">Nie przypisano ocen liczbowych w audycie dla tej pozycji. Dane opisowe pozostają kompletne.</p>}
+                      {jacket.breathability == null ? (
+                        <p className="no-rating-note">
+                          <b>Ranking opisowy.</b> Nie przypisano ocen liczbowych 1–5 w audycie dla tej pozycji. Dane opisowe pozostają kompletne.
+                        </p>
+                      ) : (
+                        RATING_LABELS.map(([key, label]) => {
+                          const value = jacket[key]
+                          return (
+                            <div className="metric-row" key={key}>
+                              <span>{label}</span>
+                              <div className="metric-track">{value != null && <i style={{ width: `${value * 20}%` }} />}</div>
+                              <b>{value}</b>
+                            </div>
+                          )
+                        })
+                      )}
                     </div>
                     <div className="pros-cons compact-pros-cons">
                       <div><h4>Mocne strony</h4><ul>{jacket.strengths.map(item => <li key={item}>{item}</li>)}</ul></div>
