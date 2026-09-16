@@ -1,30 +1,18 @@
-name: Stage 6 production alias switch
+name: Stage 6 deployment workflow parked
 
 on:
-  push:
-    branches: [stage-4-hosted-qa]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  DEPLOYMENT_URL: trek-jacket-finder-9ftga3r5y-lukaszs-projects-d71b6aef.vercel.app
-  PRODUCTION_ALIAS: trek-jacket-finder.vercel.app
-
 jobs:
-  alias-production:
+  parked:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Point canonical production alias to corrected deployment
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Stage 6 completed
         run: |
-          test -n "$VERCEL_TOKEN"
-          npm install --global vercel@59.16.0 --no-audit --no-fund
-          vercel alias set "$DEPLOYMENT_URL" "$PRODUCTION_ALIAS" --token="$VERCEL_TOKEN"
+          echo "Stage 6 is complete. This workflow is intentionally manual-only."
+          echo "Authoritative main: 2efd033b33efecdaf87d5f37ae7f12a64397e849"
+          echo "Production deployment: dpl_FDHHQLmCzC3Jq4vx2uxaTwGr2nNb"
+          echo "Production URL: https://trek-jacket-finder.vercel.app"
