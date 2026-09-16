@@ -1,0 +1,71 @@
+name: Stage 4 redeploy QA preview
+
+on:
+  push:
+    branches:
+      - stage-4-hosted-qa
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: 926452d67ed4c9ea06d29e848974995ffdca509f
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Verify source SHA
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies and validate
+        run: |
+          npm install --no-audit --no-fund
+          npm run validate:data
+          npm run validate:ui
+          npm run build
+
+      - name: Verify Vercel credential is available
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "VERCEL_TOKEN secret is not configured"
+            exit 2
+          fi
+
+      - name: Deploy exact main to QA project as preview
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p .vercel
+          printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
+          npm install --global vercel@59.16.0 --no-audit --no-fund
+          URL="$(vercel deploy --yes --token="$VERCEL_TOKEN")"
+          echo "STAGE4_DEPLOYMENT_URL=$URL" | tee stage4-deployment-url.txt
+          case "$URL" in
+            *trek-jacket-finder*) ;;
+            *) echo "Unexpected deployment URL: $URL"; exit 1 ;;
+          esac
+
+      - name: Upload deployment URL
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4-qa-deployment-url
+          path: stage4-deployment-url.txt
+          if-no-files-found: ignore
+          retention-days: 2
