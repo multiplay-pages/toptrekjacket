@@ -44,25 +44,23 @@ jobs:
           grep -Eq 'href="/assets/[^"]+\.css"' dist/index.html
           ! grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' dist/index.html
 
-      - name: Acquire temporary QA automation bypass
+      - name: Create explicit temporary QA automation bypass
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
+          BYPASS="$(openssl rand -hex 16)"
+          echo "::add-mask::$BYPASS"
+          BODY="$(BYPASS="$BYPASS" node -e 'process.stdout.write(JSON.stringify({generate:{secret:process.env.BYPASS,note:process.env.BYPASS_NOTE}}))')"
           RESPONSE="$(curl -fsS -X PATCH \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data "{\"generate\":{\"note\":\"$BYPASS_NOTE\"}}" \
+            --data "$BODY" \
             "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_TEAM_ID")"
-          BYPASS="$(node -e '
-            const j=JSON.parse(process.argv[1]); const note=process.argv[2]; const pb=j.protectionBypass||{};
-            if(typeof pb === "string") { process.stdout.write(pb); process.exit(0); }
-            const entries=Object.entries(pb);
-            const hit=entries.find(([k,v]) => /^[A-Za-z0-9]{32}$/.test(k) && v && v.note===note) || entries.find(([k]) => /^[A-Za-z0-9]{32}$/.test(k));
-            if(!hit) process.exit(2); process.stdout.write(hit[0]);
-          ' "$RESPONSE" "$BYPASS_NOTE")"
-          test -n "$BYPASS"
-          echo "::add-mask::$BYPASS"
+          BYPASS="$BYPASS" RESPONSE="$RESPONSE" node -e '
+            const j=JSON.parse(process.env.RESPONSE); const v=j.protectionBypass?.[process.env.BYPASS];
+            if(!v || v.scope!=="automation-bypass") process.exit(2);
+          '
           echo "VERCEL_AUTOMATION_BYPASS_SECRET=$BYPASS" >> "$GITHUB_ENV"
 
       - name: Establish protected preview session and verify local assets
