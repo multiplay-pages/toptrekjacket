@@ -51,20 +51,23 @@ jobs:
         run: |
           npx --yes vercel@latest alias set "$PROD_URL" "$CANONICAL_ALIAS" --token="$VERCEL_TOKEN"
           echo "ALIAS_SWITCHED=true" >> "$GITHUB_ENV"
-      - name: Canonical byte-for-byte gate
+      - name: Canonical byte-for-byte gate with propagation retry
         run: |
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 40); do
             if HTML=$(curl -fsS "$CANONICAL_URL"); then
               printf '%s' "$HTML" > canonical-index.html
               if printf '%s' "$HTML" | grep -Fq "$EXPECTED_JS" && printf '%s' "$HTML" | grep -Fq "$EXPECTED_CSS"; then
-                curl -fsS "$CANONICAL_URL$EXPECTED_JS" -o canonical-app.js
-                curl -fsS "$CANONICAL_URL$EXPECTED_CSS" -o canonical-app.css
-                if [ "$(sha256sum canonical-app.js | cut -d' ' -f1)" = "$(cat expected-js.sha)" ] && [ "$(sha256sum canonical-app.css | cut -d' ' -f1)" = "$(cat expected-css.sha)" ]; then exit 0; fi
+                if curl -fsS "$CANONICAL_URL$EXPECTED_JS" -o canonical-app.js && curl -fsS "$CANONICAL_URL$EXPECTED_CSS" -o canonical-app.css; then
+                  if [ "$(sha256sum canonical-app.js | cut -d' ' -f1)" = "$(cat expected-js.sha)" ] && [ "$(sha256sum canonical-app.css | cut -d' ' -f1)" = "$(cat expected-css.sha)" ]; then
+                    exit 0
+                  fi
+                fi
               fi
             fi
+            echo "Canonical propagation attempt $attempt/40 not ready yet"
             sleep 2
           done
-          echo 'Canonical byte gate failed'
+          echo 'Canonical byte gate failed after retries'
           exit 1
       - name: Full Stage 7 post-production E2E
         env:
