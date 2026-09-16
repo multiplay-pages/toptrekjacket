@@ -1,17 +1,26 @@
 name: Stage 4 hosted staging QA
 
 on:
-  push:
-    branches:
-      - stage-4-hosted-qa
+  workflow_dispatch:
+    inputs:
+      expected_main_sha:
+        description: Exact main commit represented by the staging deployment
+        required: true
+        default: 926452d67ed4c9ea06d29e848974995ffdca509f
+      staging_deployment_id:
+        description: Vercel QA preview deployment ID
+        required: true
+      staging_share_url:
+        description: Authenticated/shareable Vercel preview URL
+        required: true
 
 permissions:
   contents: read
 
 env:
-  EXPECTED_MAIN_SHA: 47e954aec64b23abf54316835704bf9b00e1f422
-  STAGING_DEPLOYMENT_ID: dpl_GCAYnGvLccFno9RPJgNFMkMfMRAv
-  STAGING_SHARE_URL: https://trek-jacket-finder-d19bt5a7v-lukaszs-projects-d71b6aef.vercel.app/?_vercel_share=Vj5ttYIOX55GcamQ6gyb7Doi3q3OJ3XL
+  EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+  STAGING_DEPLOYMENT_ID: ${{ inputs.staging_deployment_id }}
+  STAGING_SHARE_URL: ${{ inputs.staging_share_url }}
 
 jobs:
   hosted-e2e:
@@ -21,7 +30,7 @@ jobs:
       - name: Checkout exact main application commit
         uses: actions/checkout@v4
         with:
-          ref: 47e954aec64b23abf54316835704bf9b00e1f422
+          ref: ${{ env.EXPECTED_MAIN_SHA }}
 
       - name: Verify source commit
         run: |
@@ -121,6 +130,9 @@ jobs:
           await page.waitForSelector('[data-testid="scenario-selector"]', { timeout: 15000 })
           await page.waitForTimeout(5000)
           console.log(JSON.stringify({ badResponses, consoleErrors, failedRequests, pageErrors }, null, 2))
+          if (badResponses.length || consoleErrors.length || failedRequests.length || pageErrors.length) {
+            process.exitCode = 1
+          }
           await browser.close()
           NODE
 
