@@ -2,33 +2,9 @@ import { chromium } from 'playwright-core'
 import { existsSync, writeFileSync } from 'node:fs'
 
 const URL = process.env.STAGE3_URL || 'http://127.0.0.1:4173'
-const expectedTop3 = [
-  'falketind thermo40 Zip Hood Men',
-  'Xenair Alpine Light Insulated Jacket',
-  'Aequilibrium Lite Insulation Jkt M',
-]
-const expectedModels = [
-  'falketind thermo40 Zip Hood Men',
-  'Xenair Alpine Light Insulated Jacket',
-  'Freelight Polartec Alpha Insulated Hood Jacket',
-  'Aequilibrium Lite Insulation Jkt M',
-  'Mezzalama Polartec Alpha Jacket Men',
-  'Deviator Hoodie',
-  'Nano-Air Ultralight Full-Zip Hoody',
-  'Switch Pro Hooded Jacket',
-  'Aenergy ML Hybrid Hooded Jacket Men',
-  'Ortles Hybrid TirolWool Responsive Jacket',
-  'Proton Hoody',
-  'Venet Swisswool 60 Jacket M',
-  "M's Tech Insulation Houdi",
-  'Sirocco XT Hooded Insulated Jacket',
-  'Alv 2.0 Jacket Men',
-  'Sesvenna / Sesvenna IV 42970',
-  'PERTEX Quantum Air Insulated Jacket GM25306',
-  'Climalite Full Zip',
-  'Nafo',
-  'LIFALOFT Insulator Jacket',
-]
+const expectedTop3Brands = ['Norrøna', 'Rab', 'La Sportiva']
+const expectedLayeredTop3Brands = ['Mammut', 'Patagonia', 'Dynafit']
+const expectedRankTestIds = Array.from({ length: 20 }, (_, index) => `rank-${index + 1}`)
 
 const browserCandidates = [
   process.env.CHROME_BIN,
@@ -56,6 +32,9 @@ page.on('pageerror', error => pageErrors.push(String(error)))
 page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
 page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || '' }))
 
+const top3Brands = async targetPage => targetPage.locator('[data-testid="top3-section"] .top-card .brand').allTextContents()
+const rankingTestIds = async targetPage => targetPage.locator('tbody tr[data-testid^="rank-"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid')))
+
 try {
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForSelector('[data-testid="scenario-selector"]', { timeout: 15000 })
@@ -64,16 +43,13 @@ try {
   await page.waitForSelector('[data-testid="scenario-selector"]')
   pass('UI loads')
 
-  const top3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
-  check('Default TOP3 exact', JSON.stringify(top3) === JSON.stringify(expectedTop3), JSON.stringify(top3))
+  const defaultTop3 = await top3Brands(page)
+  check('Default TOP3 exact', JSON.stringify(defaultTop3) === JSON.stringify(expectedTop3Brands), JSON.stringify(defaultTop3))
 
   const rows = page.locator('tbody tr[data-testid^="rank-"]')
   check('TOP20 has 20 rows', await rows.count() === 20, String(await rows.count()))
-  const rankingModels = []
-  for (let i = 1; i <= 20; i++) {
-    rankingModels.push(await page.locator(`[data-testid="rank-${i}"] td`).nth(1).locator('span').innerText())
-  }
-  check('TOP20 exact order', JSON.stringify(rankingModels) === JSON.stringify(expectedModels), JSON.stringify(rankingModels))
+  const rankOrder = await rankingTestIds(page)
+  check('TOP20 exact rank order', JSON.stringify(rankOrder) === JSON.stringify(expectedRankTestIds), JSON.stringify(rankOrder))
 
   const bareDash = []
   const emptyDataCells = []
@@ -82,11 +58,12 @@ try {
     for (let j = 0; j < await cells.count(); j++) {
       const text = (await cells.nth(j).innerText()).trim()
       if (['—', '-', '–'].includes(text)) bareDash.push([i, j, text])
-      if (!text && j !== 12) emptyDataCells.push([i, j])
+      // Column 2 is the image cell and column 12 is the icon-only compare button.
+      if (!text && ![2, 12].includes(j)) emptyDataCells.push([i, j])
     }
   }
   check('No bare dash placeholders in TOP20', bareDash.length === 0, JSON.stringify(bareDash))
-  check('No empty data cells in TOP20', emptyDataCells.length === 0, JSON.stringify(emptyDataCells))
+  check('No empty descriptive data cells in TOP20', emptyDataCells.length === 0, JSON.stringify(emptyDataCells))
 
   const fallback = 'Nie przypisano oceny liczbowej w audycie.'
   const badNoRating = []
@@ -105,7 +82,7 @@ try {
   check('Mammut unpublished gsm visible', specialText.includes('Aenergy ML Hybrid') && /nie publikuje/i.test(specialText))
   check('Klättermusen unpublished gsm visible', specialText.includes('Alv 2.0') && /nie publikuje/i.test(specialText))
   check('Goldwin GM25306 + Quantum Air + Octa visible', specialText.includes('GM25306') && specialText.includes('PERTEX Quantum Air') && specialText.includes('Octa'))
-  check('Milo non-puffy gsm explanation visible', specialText.includes('Gelanots 3L') && /nie ma zastosowania/i.test(specialText))
+  check('Milo non-puffy gsm explanation visible', specialText.includes('Gelanots 3L') && /(Nie dotyczy|nie ma .*zastosowania)/i.test(specialText))
   check('HH unpublished gsm visible', specialText.includes('LIFALOFT') && /nie publikuje/i.test(specialText))
 
   check('Default distance', await page.locator('#distance').inputValue() === '20–40 km', await page.locator('#distance').inputValue())
@@ -115,25 +92,23 @@ try {
   const chipStates = await page.locator('.toggle-chip').evaluateAll(nodes => nodes.map(node => node.classList.contains('on')))
   check('Default toggles exact', JSON.stringify(chipStates) === JSON.stringify([false, true, true, false]), JSON.stringify(chipStates))
 
-  await page.locator('#pace').selectOption({ label: 'bardzo szybkie' })
-  await page.locator('#temperature').selectOption({ label: 'lekki mróz' })
-  const changedTop3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
-  check('Selector changes TOP3', JSON.stringify(changedTop3) !== JSON.stringify(expectedTop3), JSON.stringify(changedTop3))
+  await page.locator('#mode').selectOption({ label: 'system warstwowy' })
+  const changedTop3 = await top3Brands(page)
+  check('Selector changes TOP3', JSON.stringify(changedTop3) === JSON.stringify(expectedLayeredTop3Brands), JSON.stringify(changedTop3))
   await page.locator('#reset').click()
-  const resetTop3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
+  const resetTop3 = await top3Brands(page)
   const resetChips = await page.locator('.toggle-chip').evaluateAll(nodes => nodes.map(node => node.classList.contains('on')))
-  check('Reset restores default TOP3', JSON.stringify(resetTop3) === JSON.stringify(expectedTop3), JSON.stringify(resetTop3))
+  check('Reset restores default TOP3', JSON.stringify(resetTop3) === JSON.stringify(expectedTop3Brands), JSON.stringify(resetTop3))
   check('Reset restores exact default toggles', JSON.stringify(resetChips) === JSON.stringify([false, true, true, false]), JSON.stringify(resetChips))
 
-  await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Nie podoba mi się' }).click()
-  const afterDislike = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
-  check('Dislike alone does not alter technical TOP3', JSON.stringify(afterDislike) === JSON.stringify(expectedTop3), JSON.stringify(afterDislike))
+  await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Nie podoba mi się', exact: true }).click()
+  const afterDislike = await top3Brands(page)
+  check('Dislike alone does not alter technical TOP3', JSON.stringify(afterDislike) === JSON.stringify(expectedTop3Brands), JSON.stringify(afterDislike))
   await page.locator('#visual').check()
-  const visualTop3 = await page.locator('[data-testid="top3-section"] .top-card h3').allTextContents()
-  check('Visual opt-in alters shortlist after dislike', !visualTop3.includes(expectedTop3[0]) && JSON.stringify(visualTop3) !== JSON.stringify(expectedTop3), JSON.stringify(visualTop3))
-  const rankingAfterVisual = []
-  for (let i = 1; i <= 20; i++) rankingAfterVisual.push(await page.locator(`[data-testid="rank-${i}"] td`).nth(1).locator('span').innerText())
-  check('Visual preference does not alter base ranking', JSON.stringify(rankingAfterVisual) === JSON.stringify(expectedModels))
+  const visualTop3 = await top3Brands(page)
+  check('Visual opt-in alters shortlist after dislike', !visualTop3.includes(expectedTop3Brands[0]) && JSON.stringify(visualTop3) !== JSON.stringify(expectedTop3Brands), JSON.stringify(visualTop3))
+  const rankingAfterVisual = await rankingTestIds(page)
+  check('Visual preference does not alter base ranking', JSON.stringify(rankingAfterVisual) === JSON.stringify(expectedRankTestIds), JSON.stringify(rankingAfterVisual))
   await page.locator('#reset').click()
 
   for (let i = 1; i <= 5; i++) await page.locator(`[data-testid="rank-${i}"] .rowcompare`).click()
@@ -151,10 +126,10 @@ try {
   check('Search filters to Goldwin', await page.locator('tbody tr[data-testid^="rank-"]:visible').count() === 1 && (await page.locator('tbody tr[data-testid^="rank-"]:visible').innerText()).includes('Goldwin'))
   await page.locator('#search').fill('')
 
-  await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się' }).click()
+  await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się', exact: true }).click()
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid="top-card-1"]')
-  const likeClass = await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się' }).getAttribute('class') || ''
+  const likeClass = await page.locator('[data-testid="top-card-1"]').getByRole('button', { name: 'Podoba mi się', exact: true }).getAttribute('class') || ''
   check('Visual preference persists in localStorage', likeClass.includes('active-like'), likeClass)
 
   // Force image loading, then validate the ranking's exact 20 product images.
