@@ -7,6 +7,9 @@ export type ProductImageMeta = {
   color?: string
 }
 
+const proxied = (url: string) =>
+  `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=1400&output=webp`
+
 const image = (
   imageUrl: string,
   sourceUrl = imageUrl,
@@ -16,7 +19,7 @@ const image = (
 ): ProductImageMeta => ({
   imageStatus: 'verified',
   imageUrl,
-  imageFallbacks,
+  imageFallbacks: Array.from(new Set([...imageFallbacks, proxied(imageUrl)])),
   imageSourceLabel: sourceLabel,
   imageSourceUrl: sourceUrl,
   color,
@@ -25,8 +28,10 @@ const image = (
 /**
  * Stage 3 image references recovered from the verified production UI and then
  * hardened on 16.09.2026 to avoid a protected Vercel deployment proxy.
- * These references are presentation metadata only. Product facts remain sourced from
- * the authoritative Stage 2 DATA PACK.
+ * Stage 7 adds a deterministic proxy fallback of the SAME exact product image.
+ * It never substitutes another model: if both the original and exact-image proxy
+ * fail, ProductPhoto still falls back to the explicit unavailable state.
+ * Product facts remain sourced from the authoritative Stage 2 DATA PACK.
  */
 export const productImages: Record<string, ProductImageMeta> = {
   'norrona-falketind-thermo40': image(
