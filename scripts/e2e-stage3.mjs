@@ -46,6 +46,11 @@ try {
   const defaultTop3 = await top3Brands(page)
   check('Default TOP3 exact', JSON.stringify(defaultTop3) === JSON.stringify(expectedTop3Brands), JSON.stringify(defaultTop3))
 
+  const topGsm = page.locator('[data-testid="top3-section"] [data-testid="top-gsm"]')
+  check('TOP3 shows gramatura/status on all cards', await topGsm.count() === 3 && (await topGsm.allInnerTexts()).every(text => text.trim().length > 15), JSON.stringify(await topGsm.allInnerTexts()))
+  const topLimitations = page.locator('[data-testid="top3-section"] [data-testid="top-limitations"]')
+  check('TOP3 shows limitations on all cards', await topLimitations.count() === 3 && (await topLimitations.allInnerTexts()).every(text => text.includes('Najważniejsze ograniczenia')), JSON.stringify(await topLimitations.allInnerTexts()))
+
   const rows = page.locator('tbody tr[data-testid^="rank-"]')
   check('TOP20 has 20 rows', await rows.count() === 20, String(await rows.count()))
   const rankOrder = await rankingTestIds(page)
@@ -58,24 +63,25 @@ try {
     for (let j = 0; j < await cells.count(); j++) {
       const text = (await cells.nth(j).innerText()).trim()
       if (['—', '-', '–'].includes(text)) bareDash.push([i, j, text])
-      // Column 2 is the image cell and column 12 is the icon-only compare button.
-      if (!text && ![2, 12].includes(j)) emptyDataCells.push([i, j])
+      // Column 2 is the image cell and column 9 is the icon-only compare button.
+      if (!text && ![2, 9].includes(j)) emptyDataCells.push([i, j])
     }
   }
   check('No bare dash placeholders in TOP20', bareDash.length === 0, JSON.stringify(bareDash))
   check('No empty descriptive data cells in TOP20', emptyDataCells.length === 0, JSON.stringify(emptyDataCells))
 
-  const fallback = 'Nie przypisano oceny liczbowej w audycie.'
   const badNoRating = []
   for (let i = 11; i <= 20; i++) {
-    const cells = page.locator(`[data-testid="rank-${i}"] td`)
-    const values = []
-    for (let j = 5; j <= 10; j++) values.push((await cells.nth(j).innerText()).trim())
-    if (values.some(value => value !== fallback)) badNoRating.push([i, values])
+    const cell = page.locator(`[data-testid="descriptive-ratings-${i}"]`)
+    const text = await cell.count() ? (await cell.innerText()).trim() : ''
+    if (!/Ranking opisowy/i.test(text) || /\b[1-5](?:\.5)?\/5\b/.test(text)) badNoRating.push([i, text])
   }
   check('#11–20 no invented numeric scores', badNoRating.length === 0, JSON.stringify(badNoRating))
 
   check('Full data has 20 records', await page.locator('details[data-testid^="details-"]').count() === 20)
+  const compactSummaries = page.locator('[data-testid^="detail-summary-specs-"]')
+  check('Collapsed DATA PACK summaries expose weight insulation and gsm', await compactSummaries.count() === 20 && (await compactSummaries.allInnerTexts()).every(text => text.includes('·')), JSON.stringify((await compactSummaries.allInnerTexts()).slice(0, 3)))
+
   for (const index of [3, 9, 15, 17, 19, 20]) await page.locator(`[data-testid="details-${index}"] summary`).click()
   const specialText = (await Promise.all([3, 9, 15, 17, 19, 20].map(index => page.locator(`[data-testid="details-${index}"]`).innerText()))).join('\n')
   check('Peak disputed 68/85 visible', specialText.includes('68') && specialText.includes('85') && /sporn/i.test(specialText))
@@ -120,6 +126,8 @@ try {
   const compareText = await page.locator('.compare-modal').innerText()
   check('Compare includes strengths and limitations', compareText.includes('Mocne strony') && compareText.includes('Ograniczenia'))
   check('Compare includes status and sources', /potwierdzony/i.test(compareText) && /źródło/i.test(compareText))
+  check('Compare includes product descriptions', await page.locator('.compare-modal [data-testid="compare-description"]').count() === 4)
+  check('Compare includes price/reference', await page.locator('.compare-modal [data-testid="compare-price"]').count() === 4 && compareText.includes('Cena / referencja'))
   await page.locator('.compare-modal .modal-close').click()
 
   await page.locator('#search').fill('Goldwin')
@@ -156,6 +164,7 @@ try {
   await mobile.goto(URL, { waitUntil: 'domcontentloaded' })
   await mobile.waitForSelector('.mobile-ranking')
   check('Mobile ranking has 20 cards', await mobile.locator('.mobile-rank-card').count() === 20, String(await mobile.locator('.mobile-rank-card').count()))
+  check('Mobile #11–20 shows descriptive ranking note', await mobile.locator('.mobile-descriptive-note').count() === 10, String(await mobile.locator('.mobile-descriptive-note').count()))
   const overflow = await mobile.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   check('No page-level mobile horizontal overflow', overflow <= 2, String(overflow))
   await mobile.screenshot({ path: 'stage3-e2e-mobile.png', fullPage: true })
