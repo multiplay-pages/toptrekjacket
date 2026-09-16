@@ -2,6 +2,7 @@ import jackets01to05 from './data/jackets-01-05.json'
 import jackets06to10 from './data/jackets-06-10.json'
 import jackets11to15 from './data/jackets-11-15.json'
 import jackets16to20 from './data/jackets-16-20.json'
+import { marketDataByRank } from './market-data'
 
 const rawJackets = [
   ...jackets01to05,
@@ -14,6 +15,10 @@ const rawJackets = [
  * STAGE 2 AUTHORITATIVE DATA
  * Product facts come from the Notion DATA PACK dated 15.09.2026.
  * Ranking and scenario selector logic are intentionally preserved from Stage 1.
+ *
+ * STAGE 7 PRESENTATION LAYER
+ * Editorial/user-use ratings and dated market-price snapshots are merged from
+ * market-data.ts. They do not alter the authoritative product facts or base rank.
  */
 export type EvidenceStatus =
   | 'confirmed'
@@ -63,6 +68,9 @@ export type Jacket = JacketFacts & {
   km50?: number
   km100?: number
 
+  marketPrice: string
+  marketPriceCheckedAt: string
+
   // Compatibility aliases used by the recovered Stage 1 UI.
   price: string
   verdict: string
@@ -83,30 +91,23 @@ const ids = Object.fromEntries(
   authoritativeFacts.map(({ rank, id }) => [rank, id]),
 ) as Record<number, string>
 
-const knownRatings: Record<
-  number,
-  Partial<Pick<Jacket, 'breathability' | 'wind' | 'backpack' | 'forest' | 'km20' | 'km50' | 'km100'>>
-> = {
-  1: { breathability: 4.5, wind: 4, backpack: 4.5, forest: 4, km20: 5, km50: 5, km100: 4 },
-  2: { breathability: 4.5, wind: 4, backpack: 4.5, forest: 3.5, km20: 5, km50: 4.5, km100: 3.5 },
-  3: { breathability: 5, wind: 3.5, backpack: 4, forest: 3.5, km20: 4.5, km50: 5, km100: 4.5 },
-  4: { breathability: 4.5, wind: 4, backpack: 5, forest: 3.5, km20: 5, km50: 4.5, km100: 4 },
-  5: { breathability: 5, wind: 3.5, backpack: 4, forest: 3.5, km20: 4.5, km50: 5, km100: 4 },
-  6: { breathability: 5, wind: 3.5, backpack: 4.5, forest: 3.5, km20: 4.5, km50: 5, km100: 4.5 },
-  7: { breathability: 5, wind: 3.5, backpack: 4.5, forest: 3.5, km20: 4, km50: 5, km100: 5 },
-  8: { breathability: 4.5, wind: 4, backpack: 4.5, forest: 4, km20: 4.5, km50: 4.5, km100: 4 },
-  9: { breathability: 5, wind: 3, backpack: 4.5, forest: 3, km20: 4, km50: 5, km100: 4.5 },
-  10: { breathability: 4, wind: 4.5, backpack: 4.5, forest: 5, km20: 5, km50: 4, km100: 3.5 },
-}
+export const jackets: Jacket[] = authoritativeFacts.map(facts => {
+  const market = marketDataByRank[facts.rank]
+  if (!market) throw new Error(`Missing Stage 7 market/rating snapshot for rank ${facts.rank}`)
 
-export const jackets: Jacket[] = authoritativeFacts.map(facts => ({
-  ...facts,
-  ...(knownRatings[facts.rank] || {}),
-  price: facts.priceReference,
-  verdict: facts.description,
-  caveats: facts.weaknesses,
-  imageStatus: 'needs-verification',
-}))
+  return {
+    ...facts,
+    ...market.ratings,
+    marketPrice: market.marketPrice,
+    marketPriceCheckedAt: market.marketPriceCheckedAt,
+    priceReference: `${market.marketPrice}. ${market.priceReference}`,
+    sources: [...facts.sources, ...market.priceSources],
+    price: market.marketPrice,
+    verdict: facts.description,
+    caveats: facts.weaknesses,
+    imageStatus: 'needs-verification',
+  }
+})
 
 export type Scenario = {
   distance: '10–20 km' | '20–40 km' | '40–50 km'
