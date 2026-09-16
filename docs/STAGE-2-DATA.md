@@ -58,9 +58,11 @@ Stage 2 intentionally does **not** change:
 - [x] Evidence uncertainty is represented structurally.
 - [x] Critical six-model guardrails are encoded.
 - [x] No numeric scores invented for #11–20.
-- [x] `npm run validate:data` passes in GitHub Actions — PR #2 run `35063846429`.
-- [x] `npm run build` passes in GitHub Actions — PR #2 run `35063846429`.
-- [ ] PR merged to `main`.
+- [x] `npm run validate:data` passes in GitHub Actions — PR #2 runs `35063846429` and `35063961191`.
+- [x] `npm run build` passes in GitHub Actions — PR #2 runs `35063846429` and `35063961191`.
+- [x] PR #2 merged to `main` — merge commit `4ee1ea698f9146c17f0db3ca5b0d7776ab220503`.
 - [x] Vercel production remains unchanged — `dpl_5K45KnvaPhBk95XHFD7DuaDfPrte` is still the production deployment.
 
-Stage 2 is PASS only after the CI checks above pass and the PR is merged.
+## Status
+
+**PASS — Stage 2 complete.** The authoritative 20/20 DATA PACK is now represented in repository data with automated validation. Production has not been redeployed; UI integration and preview QA belong to Stage 3.
