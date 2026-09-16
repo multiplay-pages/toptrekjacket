@@ -1,0 +1,37 @@
+name: Stage 3 public shortlist smoke
+
+on:
+  push:
+    branches: [stage-3-full-ui]
+    paths:
+      - 'scripts/public-shortlist-smoke.mjs'
+      - '.github/workflows/stage3-public-shortlist-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-shortlist-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify immutable public shortlist snapshot
+        env:
+          PUBLIC_STAGE3_URL: https://rawcdn.githack.com/multiplay-pages/toptrekjacket/f0bcb2b1048c1f21dabdc6b046cc92a9d8928f1d/stage3-public-preview/index.html
+        run: node scripts/public-shortlist-smoke.mjs
+      - name: Upload public smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3-public-shortlist-smoke
+          path: stage3-public-shortlist.png
+          if-no-files-found: ignore
+          retention-days: 7
