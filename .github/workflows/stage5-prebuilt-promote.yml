@@ -1,0 +1,255 @@
+name: Stage 5 prebuilt preview gate and promote
+
+on:
+  push:
+    branches:
+      - stage-5-production-control
+    paths:
+      - .github/workflows/stage5-prebuilt-promote.yml
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_MAIN_SHA: 926452d67ed4c9ea06d29e848974995ffdca509f
+  VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+  VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+  PRODUCTION_URL: https://trek-jacket-finder.vercel.app
+  ROLLBACK_DEPLOYMENT_ID: dpl_5K45KnvaPhBk95XHFD7DuaDfPrte
+  BYPASS_NOTE: Stage 5 prebuilt preview QA temporary
+
+jobs:
+  prebuilt-gate-promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact verified main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_MAIN_SHA }}
+
+      - name: Verify exact source commit
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install validate and build exact source
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run validate:data
+          npm run validate:ui
+          npm run build
+          test -f dist/assets/index-DRZzhiVY.js
+          test -f dist/assets/index-BRAmPyZq.css
+          grep -Eq 'src="/assets/index-DRZzhiVY\.js"' dist/index.html
+          grep -Eq 'href="/assets/index-BRAmPyZq\.css"' dist/index.html
+          ! grep -Eqi 'raw\.githack\.com|raw\.githubusercontent\.com|github\.io' dist/index.html
+
+      - name: Package exact dist as Vercel Build Output API
+        run: |
+          set -euo pipefail
+          mkdir -p .vercel/output/static
+          cp -a dist/. .vercel/output/static/
+          printf '{"version":3}\n' > .vercel/output/config.json
+          cat > .vercel/project.json <<JSON
+          {"orgId":"$VERCEL_ORG_ID","projectId":"$VERCEL_PROJECT_ID"}
+          JSON
+          test -f .vercel/output/static/index.html
+          test -f .vercel/output/static/assets/index-DRZzhiVY.js
+          test -f .vercel/output/static/assets/index-BRAmPyZq.css
+
+      - name: Deploy prebuilt artifact as preview only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          npx --yes vercel@59.16.0 deploy --prebuilt --yes --token "$VERCEL_TOKEN" 2>&1 | tee stage5-preview-deploy.txt
+          PREVIEW_URL="$(grep -Eo 'https://trek-jacket-finder-[a-z0-9-]+\.vercel\.app' stage5-preview-deploy.txt | tail -1)"
+          test -n "$PREVIEW_URL"
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+          echo "preview=$PREVIEW_URL" | tee stage5-promotion-evidence.txt
+          echo "source=$EXPECTED_MAIN_SHA" | tee -a stage5-promotion-evidence.txt
+          echo "rollback=$ROLLBACK_DEPLOYMENT_ID" | tee -a stage5-promotion-evidence.txt
+
+      - name: Create explicit temporary automation bypass
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          BYPASS="$(openssl rand -hex 16)"
+          echo "::add-mask::$BYPASS"
+          BODY="$(BYPASS="$BYPASS" node -e 'process.stdout.write(JSON.stringify({generate:{secret:process.env.BYPASS,note:process.env.BYPASS_NOTE}}))')"
+          RESPONSE="$(curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data "$BODY" \
+            "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_ORG_ID")"
+          BYPASS="$BYPASS" RESPONSE="$RESPONSE" node -e '
+            const j=JSON.parse(process.env.RESPONSE); const v=j.protectionBypass?.[process.env.BYPASS];
+            if(!v || v.scope!=="automation-bypass") process.exit(2)
+          '
+          echo "VERCEL_AUTOMATION_BYPASS_SECRET=$BYPASS" >> "$GITHUB_ENV"
+
+      - name: Verify immutable preview assets
+        run: |
+          set -euo pipefail
+          INDEX_STATUS="$(curl -sS -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" -o stage5-preview-index.html -w '%{http_code}' "$PREVIEW_URL/")"
+          test "$INDEX_STATUS" = 200
+          grep -Eq 'src="/assets/index-DRZzhiVY\.js"' stage5-preview-index.html
+          grep -Eq 'href="/assets/index-BRAmPyZq\.css"' stage5-preview-index.html
+          JS_STATUS="$(curl -sS -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" -o /tmp/app.js -w '%{http_code}' "$PREVIEW_URL/assets/index-DRZzhiVY.js")"
+          CSS_STATUS="$(curl -sS -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" -o /tmp/app.css -w '%{http_code}' "$PREVIEW_URL/assets/index-BRAmPyZq.css")"
+          test "$JS_STATUS" = 200
+          test "$CSS_STATUS" = 200
+          printf 'preview_index=%s\npreview_js=%s bytes=%s\npreview_css=%s bytes=%s\n' "$INDEX_STATUS" "$JS_STATUS" "$(wc -c </tmp/app.js)" "$CSS_STATUS" "$(wc -c </tmp/app.css)" | tee -a stage5-promotion-evidence.txt
+
+      - name: Prepare auth wrapper around exact Stage 3 E2E
+        run: |
+          cp scripts/e2e-stage3.mjs stage5-preview-e2e-auth.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const path='stage5-preview-e2e-auth.mjs'
+          let src=readFileSync(path,'utf8')
+          const needle="const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })\n"
+          const injected=needle+`if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {\n  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET\n  const seed = new globalThis.URL(URL)\n  seed.searchParams.set('x-vercel-protection-bypass', bypass)\n  await context.request.get(seed.toString(), { headers: { 'x-vercel-set-bypass-cookie': 'true' }, maxRedirects: 0 })\n  const protectedOrigin = new globalThis.URL(URL).origin\n  await context.route(protectedOrigin + '/**', async route => {\n    await route.continue({ headers: { ...route.request().headers(), 'x-vercel-protection-bypass': bypass } })\n  })\n}\n`
+          if(!src.includes(needle)) throw new Error('Stage 3 E2E context hook not found')
+          writeFileSync(path,src.replace(needle,injected))
+          NODE
+
+      - name: Full 35-check QA on prebuilt preview
+        env:
+          STAGE3_URL: ${{ env.PREVIEW_URL }}
+        run: node stage5-preview-e2e-auth.mjs
+
+      - name: Hard preview browser diagnostics
+        env:
+          STAGE3_URL: ${{ env.PREVIEW_URL }}
+        run: |
+          node --input-type=module <<'NODE' | tee stage5-preview-diagnostics.json
+          import { chromium } from 'playwright-core'
+          import { existsSync } from 'node:fs'
+          const candidates=[process.env.CHROME_BIN,'/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser'].filter(Boolean)
+          const executablePath=candidates.find(p=>existsSync(p)); if(!executablePath) throw new Error('No Chrome/Chromium')
+          const report={badResponses:[],consoleErrors:[],failedRequests:[],pageErrors:[]}
+          const browser=await chromium.launch({executablePath,headless:true,args:['--no-sandbox']})
+          const context=await browser.newContext({viewport:{width:1440,height:1000}})
+          const bypass=process.env.VERCEL_AUTOMATION_BYPASS_SECRET, base=process.env.STAGE3_URL
+          const seed=new URL(base); seed.searchParams.set('x-vercel-protection-bypass',bypass)
+          await context.request.get(seed.toString(),{headers:{'x-vercel-set-bypass-cookie':'true'},maxRedirects:0})
+          const origin=new URL(base).origin
+          await context.route(origin+'/**',async route=>route.continue({headers:{...route.request().headers(),'x-vercel-protection-bypass':bypass}}))
+          const page=await context.newPage()
+          page.on('response',r=>{if(r.status()>=400) report.badResponses.push({status:r.status(),url:r.url(),resourceType:r.request().resourceType()})})
+          page.on('console',m=>{if(m.type()==='error') report.consoleErrors.push({text:m.text(),location:m.location()})})
+          page.on('requestfailed',r=>report.failedRequests.push({url:r.url(),error:r.failure()?.errorText||''}))
+          page.on('pageerror',e=>report.pageErrors.push(String(e)))
+          await page.goto(base,{waitUntil:'domcontentloaded',timeout:30000})
+          await page.waitForSelector('[data-testid="scenario-selector"]',{timeout:15000})
+          await page.waitForTimeout(5000)
+          console.log(JSON.stringify(report,null,2))
+          await browser.close()
+          if(Object.values(report).some(v=>v.length)) process.exitCode=1
+          NODE
+
+      - name: Promote the exact tested preview to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes vercel@59.16.0 promote "$PREVIEW_URL" --yes --token "$VERCEL_TOKEN" 2>&1 | tee stage5-promote.txt
+          touch stage5-promoted.flag
+          echo "promoted_preview=$PREVIEW_URL" | tee -a stage5-promotion-evidence.txt
+
+      - name: Verify production alias serves exact tested bundle
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            STATUS="$(curl -sS -o stage5-production-index.html -w '%{http_code}' "$PRODUCTION_URL/?stage5=$i")"
+            if [ "$STATUS" = 200 ] && grep -Eq 'src="/assets/index-DRZzhiVY\.js"' stage5-production-index.html && grep -Eq 'href="/assets/index-BRAmPyZq\.css"' stage5-production-index.html; then break; fi
+            sleep 2
+          done
+          test "$STATUS" = 200
+          grep -Eq 'src="/assets/index-DRZzhiVY\.js"' stage5-production-index.html
+          grep -Eq 'href="/assets/index-BRAmPyZq\.css"' stage5-production-index.html
+          echo "production_index=$STATUS" | tee -a stage5-promotion-evidence.txt
+
+      - name: Full 35-check post-production QA
+        env:
+          STAGE3_URL: ${{ env.PRODUCTION_URL }}
+        run: node scripts/e2e-stage3.mjs
+
+      - name: Hard production browser diagnostics
+        env:
+          STAGE3_URL: ${{ env.PRODUCTION_URL }}
+        run: |
+          node --input-type=module <<'NODE' | tee stage5-production-diagnostics.json
+          import { chromium } from 'playwright-core'
+          import { existsSync } from 'node:fs'
+          const candidates=[process.env.CHROME_BIN,'/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser'].filter(Boolean)
+          const executablePath=candidates.find(p=>existsSync(p)); if(!executablePath) throw new Error('No Chrome/Chromium')
+          const report={badResponses:[],consoleErrors:[],failedRequests:[],pageErrors:[]}
+          const browser=await chromium.launch({executablePath,headless:true,args:['--no-sandbox']})
+          const context=await browser.newContext({viewport:{width:1440,height:1000}})
+          const page=await context.newPage()
+          page.on('response',r=>{if(r.status()>=400) report.badResponses.push({status:r.status(),url:r.url(),resourceType:r.request().resourceType()})})
+          page.on('console',m=>{if(m.type()==='error') report.consoleErrors.push({text:m.text(),location:m.location()})})
+          page.on('requestfailed',r=>report.failedRequests.push({url:r.url(),error:r.failure()?.errorText||''}))
+          page.on('pageerror',e=>report.pageErrors.push(String(e)))
+          await page.goto(process.env.STAGE3_URL,{waitUntil:'domcontentloaded',timeout:30000})
+          await page.waitForSelector('[data-testid="scenario-selector"]',{timeout:15000})
+          await page.waitForTimeout(5000)
+          console.log(JSON.stringify(report,null,2))
+          await browser.close()
+          if(Object.values(report).some(v=>v.length)) process.exitCode=1
+          NODE
+
+      - name: Revoke temporary automation bypass
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then exit 0; fi
+          BODY="$(node -e 'process.stdout.write(JSON.stringify({revoke:{secret:process.env.VERCEL_AUTOMATION_BYPASS_SECRET,regenerate:false}}))')"
+          curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data "$BODY" \
+            "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/protection-bypass?teamId=$VERCEL_ORG_ID" >/dev/null
+
+      - name: Automatic rollback if any post-promotion gate failed
+        if: failure()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -f stage5-promoted.flag ]; then
+            echo "Post-promotion gate failed; rolling back to $ROLLBACK_DEPLOYMENT_ID"
+            npx --yes vercel@59.16.0 rollback "$ROLLBACK_DEPLOYMENT_ID" --yes --token "$VERCEL_TOKEN"
+          else
+            echo "No production promotion occurred; rollback not needed"
+          fi
+
+      - name: Upload Stage 5 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage5-prebuilt-promote-evidence
+          path: |
+            stage3-e2e-report.json
+            stage3-e2e-desktop.png
+            stage3-e2e-mobile.png
+            stage5-preview-deploy.txt
+            stage5-preview-index.html
+            stage5-preview-diagnostics.json
+            stage5-promote.txt
+            stage5-production-index.html
+            stage5-production-diagnostics.json
+            stage5-promotion-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 30
