@@ -1,0 +1,43 @@
+/* Stage 7 — one consistent presentation contract for all 20 products. */
+.top-quick-specs{grid-template-columns:repeat(2,minmax(0,1fr))}
+.top-quick-specs span:last-child{grid-column:auto}
+.top-ratings{margin:.8rem 0 1rem;padding:.75rem;border:1px solid #e0e6df;border-radius:12px;background:#fbfcfa}
+.top-ratings>small{display:block;margin-bottom:.5rem;font-size:.72rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#687269}
+.top-ratings .rating-summary{grid-template-columns:repeat(3,minmax(72px,1fr))}
+
+.stage7-ranking-table{min-width:1540px}
+.stage7-ranking-table td:nth-child(4){min-width:115px}
+.stage7-ranking-table td:nth-child(5){min-width:145px}
+.stage7-ranking-table td:nth-child(6){min-width:240px}
+.stage7-ranking-table td:nth-child(7){min-width:190px}
+.stage7-ranking-table td:nth-child(8){min-width:320px}
+.stage7-ranking-table td:nth-child(9){min-width:150px}
+.stage7-ranking-table td:nth-child(10){min-width:105px}
+.stage7-ranking-table td:nth-child(11){min-width:74px}
+.table-market-price{line-height:1.4}
+.table-market-price b,.table-market-price small{display:block}
+.table-market-price b{font-size:.82rem}
+.table-market-price small{margin-top:.3rem;color:#687269;font-size:.72rem}
+
+.mobile-gsm,.mobile-market-price,.mobile-ratings,.mobile-descriptive-note{grid-column:1/-1}
+.mobile-market-price,.mobile-ratings{line-height:1.45}
+.mobile-market-price small,.mobile-ratings small{display:block;margin-bottom:.15rem;color:#687269;font-weight:800}
+
+.detail-ratings{margin-top:1rem;padding:.9rem;border:1px solid #e0e6df;border-radius:12px;background:#f7f9f6}
+.detail-ratings h4{margin:0 0 .25rem}
+.detail-ratings>p{margin:0 0 .7rem;color:#687269;font-size:.78rem;line-height:1.45}
+.detail-ratings .rating-summary{grid-template-columns:repeat(3,minmax(72px,1fr))}
+
+.compare-col [data-testid="compare-price"] b,.compare-col [data-testid="compare-price"] small{display:block}
+.compare-col [data-testid="compare-price"] small{margin-top:.2rem;color:#687269}
+
+@media(max-width:850px){
+  .top-quick-specs{grid-template-columns:1fr 1fr}
+  .top-quick-specs span:last-child{grid-column:auto}
+}
+@media(max-width:520px){
+  .top-quick-specs{grid-template-columns:1fr}
+  .top-ratings .rating-summary,.detail-ratings .rating-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mobile-spec-grid{grid-template-columns:1fr 1fr}
+  .mobile-gsm,.mobile-market-price,.mobile-ratings,.mobile-descriptive-note{grid-column:1/-1}
+}
