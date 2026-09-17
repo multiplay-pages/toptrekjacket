@@ -1,0 +1,273 @@
+name: Stage 8 Production Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage8-prod-release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage8-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+      VERCEL_PROJECT_ID: prj_rMjJIycxQZmCSvPpupYs5PsbqFjm
+      SOURCE_APP_SHA: ed317ceb78049553711320485f85efdb190fa6ba
+      CANONICAL_URL: https://trek-jacket-finder.vercel.app
+      ROLLBACK_DEPLOYMENT_ID: dpl_87skmWGp2PpsXKrPbzzRvfjssgeb
+
+    steps:
+      - name: Checkout exact merged application SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ed317ceb78049553711320485f85efdb190fa6ba
+
+      - name: Verify exact source SHA
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          test "$ACTUAL_SHA" = "$SOURCE_APP_SHA" || { echo "Unexpected source SHA: $ACTUAL_SHA"; exit 1; }
+          echo "SOURCE_SHA=$ACTUAL_SHA" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Preflight Vercel credential
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN is missing"; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate data and UI contract
+        run: |
+          npm run validate:data
+          npm run validate:ui
+
+      - name: Build exact merged source
+        run: npm run build
+
+      - name: Prepare deterministic prebuilt artifact for production project
+        run: |
+          rm -rf .vercel/output
+          mkdir -p .vercel/output/static
+          cp -R dist/. .vercel/output/static/
+          printf '%s\n' '{"version":3}' > .vercel/output/config.json
+          printf '%s\n' '{"orgId":"team_7hPovBT2iV7GpndA5ssdCTZs","projectId":"prj_rMjJIycxQZmCSvPpupYs5PsbqFjm"}' > .vercel/project.json
+
+      - name: Deploy release candidate preview to production project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee stage8-prod-deploy.log
+          PREVIEW_URL=$(grep -Eo 'https://[^ ]+\.vercel\.app' stage8-prod-deploy.log | tail -n 1)
+          test -n "$PREVIEW_URL" || { echo "Preview URL not found"; exit 1; }
+          printf '%s\n' "$PREVIEW_URL" | tee stage8-prod-preview-url.txt
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+
+      - name: Resolve candidate deployment and create temporary preview access
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          HOST=${PREVIEW_URL#https://}
+          DEPLOYMENT_JSON=$(curl -fsS \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v13/deployments/$HOST?teamId=$VERCEL_ORG_ID")
+          DEPLOYMENT_ID=$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.id || "")' "$DEPLOYMENT_JSON")
+          test -n "$DEPLOYMENT_ID" || { echo "Deployment ID not resolved"; exit 1; }
+
+          SHARE_JSON=$(curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"ttl":3600}' \
+            "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID")
+          SHARE_SECRET=$(node -e '
+            const v=JSON.parse(process.argv[1]);
+            const p=v.protectionBypass;
+            let x=v.value ?? v.secret ?? v.bypass;
+            if (!x && typeof p === "string") x=p;
+            if (!x && p && typeof p === "object") {
+              x=p.value ?? p.secret ?? p.bypass ?? p.token;
+              const u=p.protectionBypassUrl ?? p.url;
+              if (!x && typeof u === "string") {
+                try { x=new URL(u).searchParams.get("_vercel_share") } catch {}
+              }
+              if (!x) {
+                const keys=Object.keys(p);
+                if (keys.length === 1) x=keys[0];
+              }
+            }
+            process.stdout.write(typeof x === "string" ? x : "");
+          ' "$SHARE_JSON")
+          test -n "$SHARE_SECRET" || { echo "Temporary preview access not generated"; exit 1; }
+          echo "::add-mask::$SHARE_SECRET"
+          echo "CANDIDATE_DEPLOYMENT_ID=$DEPLOYMENT_ID" >> "$GITHUB_ENV"
+          echo "SHARE_SECRET=$SHARE_SECRET" >> "$GITHUB_ENV"
+          echo "STAGE3_URL=${PREVIEW_URL}/?_vercel_share=${SHARE_SECRET}" >> "$GITHUB_ENV"
+
+      - name: Candidate full regression E2E
+        run: npm run e2e:stage7
+
+      - name: Candidate network diagnostics gate
+        run: |
+          node - <<'NODE'
+          const fs = require('fs')
+          const r = JSON.parse(fs.readFileSync('stage7-e2e-report.json', 'utf8'))
+          const bad = {
+            failedRequests: r.failedRequests || [],
+            pageErrors: r.pageErrors || [],
+            consoleErrors: r.consoleErrors || [],
+          }
+          console.log(JSON.stringify(bad, null, 2))
+          if (bad.failedRequests.length || bad.pageErrors.length || bad.consoleErrors.length) process.exit(1)
+          NODE
+
+      - name: Candidate Stage 8 responsive layout gate
+        run: npm run e2e:stage8
+
+      - name: Preserve candidate evidence
+        run: |
+          mv stage7-e2e-report.json candidate-stage7-e2e-report.json
+          mv stage7-e2e-desktop.png candidate-stage7-e2e-desktop.png
+          mv stage7-e2e-mobile.png candidate-stage7-e2e-mobile.png
+          mv stage8-layout-report.json candidate-stage8-layout-report.json
+          mv stage8-layout-desktop.png candidate-stage8-layout-desktop.png
+          mv stage8-layout-tablet.png candidate-stage8-layout-tablet.png
+          mv stage8-layout-mobile.png candidate-stage8-layout-mobile.png
+
+      - name: Revoke temporary preview access
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "${CANDIDATE_DEPLOYMENT_ID:-}" ] && [ -n "${SHARE_SECRET:-}" ]; then
+            node -e 'process.stdout.write(JSON.stringify({revoke:{secret:process.argv[1],regenerate:false}}))' "$SHARE_SECRET" > stage8-prod-revoke.json
+            curl -fsS -X PATCH \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @stage8-prod-revoke.json \
+              "https://api.vercel.com/aliases/$CANDIDATE_DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID" >/dev/null
+            rm -f stage8-prod-revoke.json
+          fi
+
+      - name: Promote tested candidate to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS -o stage8-promote-response.txt -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/promote/$CANDIDATE_DEPLOYMENT_ID?teamId=$VERCEL_ORG_ID")
+          echo "Promotion HTTP status: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "202" ]; then
+            cat stage8-promote-response.txt
+            exit 1
+          fi
+          echo "PROMOTED=1" >> "$GITHUB_ENV"
+
+      - name: Wait for canonical alias and verify exact local assets
+        run: |
+          set -euo pipefail
+          EXPECTED_JS=$(grep -Eo '/assets/[^" ]+\.js' dist/index.html | head -n 1)
+          EXPECTED_CSS=$(grep -Eo '/assets/[^" ]+\.css' dist/index.html | head -n 1)
+          test -n "$EXPECTED_JS" && test -n "$EXPECTED_CSS"
+          printf '%s\n%s\n' "$EXPECTED_JS" "$EXPECTED_CSS" | tee stage8-prod-expected-assets.txt
+
+          MATCHED=0
+          for attempt in $(seq 1 18); do
+            HTML=$(curl -fsSL -H 'Cache-Control: no-cache' "$CANONICAL_URL/?release=$GITHUB_RUN_ID-$attempt" || true)
+            if printf '%s' "$HTML" | grep -Fq "$EXPECTED_JS" && printf '%s' "$HTML" | grep -Fq "$EXPECTED_CSS"; then
+              MATCHED=1
+              echo "Canonical serves expected assets on attempt $attempt"
+              break
+            fi
+            echo "Canonical not updated yet (attempt $attempt/18)"
+            sleep 5
+          done
+          test "$MATCHED" = "1" || { echo "Canonical did not converge to expected assets"; exit 1; }
+          curl -fsSL "$CANONICAL_URL$EXPECTED_JS" -o /dev/null
+          curl -fsSL "$CANONICAL_URL$EXPECTED_CSS" -o /dev/null
+          echo "STAGE3_URL=$CANONICAL_URL" >> "$GITHUB_ENV"
+
+      - name: Production canonical full regression E2E
+        run: npm run e2e:stage7
+
+      - name: Production canonical diagnostics gate
+        run: |
+          node - <<'NODE'
+          const fs = require('fs')
+          const r = JSON.parse(fs.readFileSync('stage7-e2e-report.json', 'utf8'))
+          const bad = {
+            failedRequests: r.failedRequests || [],
+            pageErrors: r.pageErrors || [],
+            consoleErrors: r.consoleErrors || [],
+          }
+          console.log(JSON.stringify(bad, null, 2))
+          if (bad.failedRequests.length || bad.pageErrors.length || bad.consoleErrors.length) process.exit(1)
+          NODE
+
+      - name: Production canonical Stage 8 responsive layout gate
+        run: npm run e2e:stage8
+
+      - name: Preserve production evidence
+        run: |
+          mv stage7-e2e-report.json production-stage7-e2e-report.json
+          mv stage7-e2e-desktop.png production-stage7-e2e-desktop.png
+          mv stage7-e2e-mobile.png production-stage7-e2e-mobile.png
+          mv stage8-layout-report.json production-stage8-layout-report.json
+          mv stage8-layout-desktop.png production-stage8-layout-desktop.png
+          mv stage8-layout-tablet.png production-stage8-layout-tablet.png
+          mv stage8-layout-mobile.png production-stage8-layout-mobile.png
+
+      - name: Roll back production on post-promotion failure
+        if: failure() && env.PROMOTED == '1'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS -o stage8-rollback-response.txt -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v1/projects/$VERCEL_PROJECT_ID/rollback/$ROLLBACK_DEPLOYMENT_ID?teamId=$VERCEL_ORG_ID")
+          echo "Rollback HTTP status: $HTTP_CODE"
+          test "$HTTP_CODE" = "201" || { cat stage8-rollback-response.txt; exit 1; }
+          echo "ROLLBACK_REQUESTED=1" >> "$GITHUB_ENV"
+
+      - name: Upload production release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage8-production-release-evidence
+          path: |
+            stage8-prod-deploy.log
+            stage8-prod-preview-url.txt
+            stage8-prod-expected-assets.txt
+            stage8-promote-response.txt
+            stage8-rollback-response.txt
+            candidate-stage7-e2e-report.json
+            candidate-stage7-e2e-desktop.png
+            candidate-stage7-e2e-mobile.png
+            candidate-stage8-layout-report.json
+            candidate-stage8-layout-desktop.png
+            candidate-stage8-layout-tablet.png
+            candidate-stage8-layout-mobile.png
+            production-stage7-e2e-report.json
+            production-stage7-e2e-desktop.png
+            production-stage7-e2e-mobile.png
+            production-stage8-layout-report.json
+            production-stage8-layout-desktop.png
+            production-stage8-layout-tablet.png
+            production-stage8-layout-mobile.png
+          if-no-files-found: ignore
+          retention-days: 14
