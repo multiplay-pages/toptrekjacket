@@ -43,7 +43,10 @@ async function inspectComparison({ name, width, height, expectedColumns, screens
       await page.waitForSelector('[data-testid="ranking-section"]', { timeout: 15000 })
 
       for (let index = 1; index <= modelCount; index += 1) {
-        await page.locator(`[data-testid="rank-${index}"] .rowcompare`).click()
+        const compareControl = width <= 700
+          ? page.locator('.mobile-ranking .mobile-rank-card').nth(index - 1).locator('.mobile-actions .compare-btn')
+          : page.locator(`[data-testid="rank-${index}"] .rowcompare`)
+        await compareControl.click()
       }
 
       const sticky = page.locator('.sticky-compare')
