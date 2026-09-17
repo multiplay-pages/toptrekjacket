@@ -1,0 +1,164 @@
+name: Stage 9C QA preview + hosted comparison gate
+
+on:
+  push:
+    branches: [feat/stage9-comparison-ux]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage9-qa-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy-and-test-qa:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+      VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
+    steps:
+      - name: Checkout exact branch SHA
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Preflight Vercel credential
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN is missing"; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate data and UI contract
+        run: |
+          npm run validate:data
+          npm run validate:ui
+
+      - name: Build exact source
+        run: npm run build
+
+      - name: Prepare deterministic static Build Output API artifact
+        run: |
+          rm -rf .vercel/output
+          mkdir -p .vercel/output/static
+          cp -R dist/. .vercel/output/static/
+          printf '%s\n' '{"version":3}' > .vercel/output/config.json
+          printf '%s\n' '{"orgId":"team_7hPovBT2iV7GpndA5ssdCTZs","projectId":"prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p"}' > .vercel/project.json
+
+      - name: Deploy preview to QA project only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -o pipefail
+          npx --yes vercel@latest deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee stage9c-vercel-deploy.log
+          PREVIEW_URL=$(grep -Eo 'https://[^ ]+\.vercel\.app' stage9c-vercel-deploy.log | tail -n 1)
+          test -n "$PREVIEW_URL" || { echo "Preview URL not found"; exit 1; }
+          printf '%s\n' "$PREVIEW_URL" | tee stage9c-preview-url.txt
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+
+      - name: Create temporary protected-preview access
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          HOST=${PREVIEW_URL#https://}
+          DEPLOYMENT_JSON=$(curl -fsS \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v13/deployments/$HOST?teamId=$VERCEL_ORG_ID")
+          DEPLOYMENT_ID=$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.id || "")' "$DEPLOYMENT_JSON")
+          test -n "$DEPLOYMENT_ID" || { echo "Deployment ID not resolved"; exit 1; }
+
+          SHARE_JSON=$(curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"ttl":3600}' \
+            "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID")
+          SHARE_SECRET=$(node -e '
+            const v=JSON.parse(process.argv[1]);
+            const p=v.protectionBypass;
+            let x=v.value ?? v.secret ?? v.bypass;
+            if (!x && typeof p === "string") x=p;
+            if (!x && p && typeof p === "object") {
+              x=p.value ?? p.secret ?? p.bypass ?? p.token;
+              const u=p.protectionBypassUrl ?? p.url;
+              if (!x && typeof u === "string") {
+                try { x=new URL(u).searchParams.get("_vercel_share") } catch {}
+              }
+              if (!x) {
+                const keys=Object.keys(p);
+                if (keys.length === 1) x=keys[0];
+              }
+            }
+            process.stdout.write(typeof x === "string" ? x : "");
+          ' "$SHARE_JSON")
+          if [ -z "$SHARE_SECRET" ]; then
+            echo "Temporary share secret not generated"
+            exit 1
+          fi
+          echo "::add-mask::$SHARE_SECRET"
+          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> "$GITHUB_ENV"
+          echo "SHARE_SECRET=$SHARE_SECRET" >> "$GITHUB_ENV"
+          echo "STAGE3_URL=${PREVIEW_URL}/?_vercel_share=${SHARE_SECRET}" >> "$GITHUB_ENV"
+
+      - name: Hosted full regression E2E
+        run: npm run e2e:stage7
+
+      - name: Hosted Stage 8 layout regression gate
+        run: npm run e2e:stage8
+
+      - name: Hosted Stage 9 comparison gate
+        run: npm run e2e:stage9
+
+      - name: Sanitize temporary access token from evidence
+        if: always()
+        run: |
+          if [ -n "${SHARE_SECRET:-}" ]; then
+            for f in stage7-e2e-report.json stage8-layout-report.json stage9-comparison-report.json; do
+              if [ -f "$f" ]; then
+                node -e 'const fs=require("fs"); const p=process.argv[1], s=process.argv[2]; let x=fs.readFileSync(p,"utf8"); fs.writeFileSync(p,x.split(s).join("REDACTED"));' "$f" "$SHARE_SECRET"
+              fi
+            done
+          fi
+
+      - name: Revoke temporary protected-preview access
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "${DEPLOYMENT_ID:-}" ] && [ -n "${SHARE_SECRET:-}" ]; then
+            node -e 'process.stdout.write(JSON.stringify({revoke:{secret:process.argv[1],regenerate:false}}))' "$SHARE_SECRET" > stage9c-revoke.json
+            curl -fsS -X PATCH \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @stage9c-revoke.json \
+              "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID" >/dev/null
+            rm -f stage9c-revoke.json
+          fi
+
+      - name: Upload hosted QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage9c-hosted-qa-evidence
+          path: |
+            stage9c-vercel-deploy.log
+            stage9c-preview-url.txt
+            stage7-e2e-report.json
+            stage7-e2e-desktop.png
+            stage7-e2e-mobile.png
+            stage8-layout-report.json
+            stage8-layout-desktop.png
+            stage8-layout-tablet.png
+            stage8-layout-mobile.png
+            stage9-comparison-report.json
+            stage9-comparison-desktop.png
+            stage9-comparison-tablet.png
+            stage9-comparison-mobile.png
+          if-no-files-found: ignore
+          retention-days: 14
