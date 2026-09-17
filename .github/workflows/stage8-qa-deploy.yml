@@ -1,4 +1,4 @@
-name: Stage 8C1 QA preview deploy
+name: Stage 8C QA preview + hosted browser gate
 
 on:
   push:
@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy-qa:
+  deploy-and-test-qa:
     runs-on: ubuntu-latest
     env:
       VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
@@ -56,16 +56,82 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -o pipefail
-          npx --yes vercel@latest deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee stage8c1-vercel-deploy.log
-          grep -Eo 'https://[^ ]+\.vercel\.app' stage8c1-vercel-deploy.log | tail -n 1 | tee stage8c1-preview-url.txt
+          npx --yes vercel@latest deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee stage8c-vercel-deploy.log
+          PREVIEW_URL=$(grep -Eo 'https://[^ ]+\.vercel\.app' stage8c-vercel-deploy.log | tail -n 1)
+          test -n "$PREVIEW_URL" || { echo "Preview URL not found"; exit 1; }
+          printf '%s\n' "$PREVIEW_URL" | tee stage8c-preview-url.txt
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
 
-      - name: Upload deployment evidence
+      - name: Create temporary protected-preview access
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          HOST=${PREVIEW_URL#https://}
+          DEPLOYMENT_JSON=$(curl -fsS \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v13/deployments/$HOST?teamId=$VERCEL_ORG_ID")
+          DEPLOYMENT_ID=$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.id || "")' "$DEPLOYMENT_JSON")
+          test -n "$DEPLOYMENT_ID" || { echo "Deployment ID not resolved"; exit 1; }
+
+          SHARE_JSON=$(curl -fsS -X PATCH \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"ttl":3600}' \
+            "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID")
+          SHARE_SECRET=$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.value || "")' "$SHARE_JSON")
+          test -n "$SHARE_SECRET" || { echo "Temporary share secret not generated"; exit 1; }
+          echo "::add-mask::$SHARE_SECRET"
+          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> "$GITHUB_ENV"
+          echo "SHARE_SECRET=$SHARE_SECRET" >> "$GITHUB_ENV"
+          echo "STAGE3_URL=${PREVIEW_URL}/?_vercel_share=${SHARE_SECRET}" >> "$GITHUB_ENV"
+
+      - name: Hosted full regression E2E
+        run: npm run e2e:stage7
+
+      - name: Hosted Stage 8 layout gate
+        run: npm run e2e:stage8
+
+      - name: Sanitize temporary access token from evidence
+        if: always()
+        run: |
+          if [ -n "${SHARE_SECRET:-}" ]; then
+            for f in stage7-e2e-report.json stage8-layout-report.json; do
+              if [ -f "$f" ]; then
+                node -e 'const fs=require("fs"); const p=process.argv[1], s=process.argv[2]; let x=fs.readFileSync(p,"utf8"); fs.writeFileSync(p,x.split(s).join("REDACTED"));' "$f" "$SHARE_SECRET"
+              fi
+            done
+          fi
+
+      - name: Revoke temporary protected-preview access
+        if: always()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "${DEPLOYMENT_ID:-}" ] && [ -n "${SHARE_SECRET:-}" ]; then
+            node -e 'process.stdout.write(JSON.stringify({revoke:{secret:process.argv[1],regenerate:false}}))' "$SHARE_SECRET" > stage8c-revoke.json
+            curl -fsS -X PATCH \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @stage8c-revoke.json \
+              "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID" >/dev/null
+            rm -f stage8c-revoke.json
+          fi
+
+      - name: Upload hosted QA evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage8c1-qa-deploy-evidence
+          name: stage8c-hosted-qa-evidence
           path: |
-            stage8c1-vercel-deploy.log
-            stage8c1-preview-url.txt
+            stage8c-vercel-deploy.log
+            stage8c-preview-url.txt
+            stage7-e2e-report.json
+            stage7-e2e-desktop.png
+            stage7-e2e-mobile.png
+            stage8-layout-report.json
+            stage8-layout-desktop.png
+            stage8-layout-tablet.png
+            stage8-layout-mobile.png
           if-no-files-found: ignore
           retention-days: 14
