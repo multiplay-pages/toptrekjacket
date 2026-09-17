@@ -4,6 +4,7 @@ import App from './App'
 import './styles.css'
 import './stage3.css'
 import './stage7.css'
+import './stage8.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
