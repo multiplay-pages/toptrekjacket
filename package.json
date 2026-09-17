@@ -22,7 +22,6 @@
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@v0/sdk": "latest",
     "@vitejs/plugin-react": "latest",
     "playwright-core": "latest",
     "vite": "latest",
