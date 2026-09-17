@@ -9,6 +9,7 @@
     "validate:ui": "node scripts/validate-ui.mjs",
     "e2e:stage3": "node scripts/e2e-stage7.mjs",
     "e2e:stage7": "node scripts/e2e-stage7.mjs",
+    "e2e:stage8": "node scripts/e2e-stage8-layout.mjs",
     "build": "tsc -b && vite build",
     "check": "npm run validate:data && npm run validate:ui && npm run build",
     "preview": "vite preview"
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@v0/sdk": "latest",
     "@vitejs/plugin-react": "latest",
     "playwright-core": "latest",
     "vite": "latest",
