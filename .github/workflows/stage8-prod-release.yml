@@ -84,23 +84,26 @@ jobs:
             | tee stage8-canonical-alias-response.json
           echo "ALIAS_SWITCHED=1" >> "$GITHUB_ENV"
 
-      - name: Wait for canonical alias and verify exact Stage 8 assets
+      - name: Wait for canonical HTML and assets to converge
         run: |
           set -euo pipefail
           MATCHED=0
-          for attempt in $(seq 1 18); do
-            HTML=$(curl -fsSL -H 'Cache-Control: no-cache' "$CANONICAL_URL/?release=$GITHUB_RUN_ID-$attempt" || true)
-            if printf '%s' "$HTML" | grep -Fq "$EXPECTED_JS" && printf '%s' "$HTML" | grep -Fq "$EXPECTED_CSS"; then
+          for attempt in $(seq 1 24); do
+            HTML=$(curl -sSL -H 'Cache-Control: no-cache' "$CANONICAL_URL/?release=$GITHUB_RUN_ID-$attempt" || true)
+            JS_CODE=$(curl -sSL -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$CANONICAL_URL$EXPECTED_JS" || true)
+            CSS_CODE=$(curl -sSL -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$CANONICAL_URL$EXPECTED_CSS" || true)
+            if printf '%s' "$HTML" | grep -Fq "$EXPECTED_JS" \
+              && printf '%s' "$HTML" | grep -Fq "$EXPECTED_CSS" \
+              && [ "$JS_CODE" = "200" ] \
+              && [ "$CSS_CODE" = "200" ]; then
               MATCHED=1
-              echo "Canonical serves expected Stage 8 assets on attempt $attempt"
+              echo "Canonical HTML + assets converged on attempt $attempt"
               break
             fi
-            echo "Canonical not updated yet (attempt $attempt/18)"
+            echo "Canonical propagation attempt $attempt/24: js=$JS_CODE css=$CSS_CODE"
             sleep 5
           done
-          test "$MATCHED" = "1" || { echo "Canonical did not converge to expected Stage 8 assets"; exit 1; }
-          curl -fsSL "$CANONICAL_URL$EXPECTED_JS" -o /dev/null
-          curl -fsSL "$CANONICAL_URL$EXPECTED_CSS" -o /dev/null
+          test "$MATCHED" = "1" || { echo "Canonical did not converge to expected Stage 8 HTML/assets"; exit 1; }
           echo "STAGE3_URL=$CANONICAL_URL" >> "$GITHUB_ENV"
 
       - name: Production canonical full regression E2E
@@ -147,11 +150,16 @@ jobs:
             | tee stage8-canonical-rollback-response.json
 
           RESTORED=0
-          for attempt in $(seq 1 18); do
-            HTML=$(curl -fsSL -H 'Cache-Control: no-cache' "$CANONICAL_URL/?rollback=$GITHUB_RUN_ID-$attempt" || true)
-            if printf '%s' "$HTML" | grep -Fq "$ROLLBACK_JS" && printf '%s' "$HTML" | grep -Fq "$ROLLBACK_CSS"; then
+          for attempt in $(seq 1 24); do
+            HTML=$(curl -sSL -H 'Cache-Control: no-cache' "$CANONICAL_URL/?rollback=$GITHUB_RUN_ID-$attempt" || true)
+            JS_CODE=$(curl -sSL -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$CANONICAL_URL$ROLLBACK_JS" || true)
+            CSS_CODE=$(curl -sSL -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' "$CANONICAL_URL$ROLLBACK_CSS" || true)
+            if printf '%s' "$HTML" | grep -Fq "$ROLLBACK_JS" \
+              && printf '%s' "$HTML" | grep -Fq "$ROLLBACK_CSS" \
+              && [ "$JS_CODE" = "200" ] \
+              && [ "$CSS_CODE" = "200" ]; then
               RESTORED=1
-              echo "Previous canonical version restored on attempt $attempt"
+              echo "Previous canonical HTML + assets restored on attempt $attempt"
               break
             fi
             sleep 5
