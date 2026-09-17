@@ -79,9 +79,32 @@ jobs:
             -H "Content-Type: application/json" \
             --data '{"ttl":3600}' \
             "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID")
-          SHARE_SECRET=$(node -e 'const v=JSON.parse(process.argv[1]); const x=v.value ?? v.protectionBypass ?? v.secret ?? v.bypass ?? v.protectionBypass?.value; process.stdout.write(typeof x === "string" ? x : "")' "$SHARE_JSON")
+          SHARE_SECRET=$(node -e '
+            const v=JSON.parse(process.argv[1]);
+            const p=v.protectionBypass;
+            let x=v.value ?? v.secret ?? v.bypass;
+            if (!x && typeof p === "string") x=p;
+            if (!x && p && typeof p === "object") {
+              x=p.value ?? p.secret ?? p.bypass ?? p.token;
+              const u=p.protectionBypassUrl ?? p.url;
+              if (!x && typeof u === "string") {
+                try { x=new URL(u).searchParams.get("_vercel_share") } catch {}
+              }
+              if (!x) {
+                const keys=Object.keys(p);
+                if (keys.length === 1) x=keys[0];
+              }
+            }
+            process.stdout.write(typeof x === "string" ? x : "");
+          ' "$SHARE_JSON")
           if [ -z "$SHARE_SECRET" ]; then
-            node -e 'const v=JSON.parse(process.argv[1]); console.log("Share response keys:", Object.keys(v).join(","))' "$SHARE_JSON"
+            node -e '
+              const v=JSON.parse(process.argv[1]);
+              const p=v.protectionBypass;
+              console.log("Share response top-level keys:", Object.keys(v).join(","));
+              console.log("protectionBypass type:", Array.isArray(p) ? "array" : typeof p);
+              if (p && typeof p === "object" && !Array.isArray(p)) console.log("protectionBypass key count:", Object.keys(p).length);
+            ' "$SHARE_JSON"
             echo "Temporary share secret not generated"
             exit 1
           fi
