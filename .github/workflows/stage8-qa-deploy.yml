@@ -1,0 +1,71 @@
+name: Stage 8C1 QA preview deploy
+
+on:
+  push:
+    branches: [feat/stage8-ranking-ux]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage8-qa-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy-qa:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_7hPovBT2iV7GpndA5ssdCTZs
+      VERCEL_PROJECT_ID: prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p
+    steps:
+      - name: Checkout exact branch SHA
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Preflight Vercel credential
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN is missing"; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate data and UI contract
+        run: |
+          npm run validate:data
+          npm run validate:ui
+
+      - name: Build exact source
+        run: npm run build
+
+      - name: Prepare deterministic static Build Output API artifact
+        run: |
+          rm -rf .vercel/output
+          mkdir -p .vercel/output/static
+          cp -R dist/. .vercel/output/static/
+          printf '%s\n' '{"version":3}' > .vercel/output/config.json
+          printf '%s\n' '{"orgId":"team_7hPovBT2iV7GpndA5ssdCTZs","projectId":"prj_CPwoFJEb8N8b7s7Ks8NKRvzFB69p"}' > .vercel/project.json
+
+      - name: Deploy preview to QA project only
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -o pipefail
+          npx --yes vercel@latest deploy --prebuilt --yes --token="$VERCEL_TOKEN" 2>&1 | tee stage8c1-vercel-deploy.log
+          grep -Eo 'https://[^ ]+\.vercel\.app' stage8c1-vercel-deploy.log | tail -n 1 | tee stage8c1-preview-url.txt
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage8c1-qa-deploy-evidence
+          path: |
+            stage8c1-vercel-deploy.log
+            stage8c1-preview-url.txt
+          if-no-files-found: ignore
+          retention-days: 14
