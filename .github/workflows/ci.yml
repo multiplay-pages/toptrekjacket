@@ -27,7 +27,7 @@ jobs:
         run: npm run validate:ui
       - name: Build
         run: npm run build
-      - name: Run Stage 7 browser E2E
+      - name: Run browser E2E gates
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > stage7-preview.log 2>&1 &
           PREVIEW_PID=$!
@@ -45,6 +45,7 @@ jobs:
           done
           npm run e2e:stage7
           npm run e2e:stage8
+          npm run e2e:stage9
       - name: Upload Stage 7 + Stage 8 E2E evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -59,5 +60,17 @@ jobs:
             stage8-layout-tablet.png
             stage8-layout-mobile.png
             stage7-preview.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload Stage 9 comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage9-comparison-evidence
+          path: |
+            stage9-comparison-report.json
+            stage9-comparison-desktop.png
+            stage9-comparison-tablet.png
+            stage9-comparison-mobile.png
           if-no-files-found: ignore
           retention-days: 14

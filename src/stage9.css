@@ -27,7 +27,6 @@
 
 .compare-grid {
   min-width: 0 !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   gap: .85rem;
   align-items: start;
 }
