@@ -79,8 +79,12 @@ jobs:
             -H "Content-Type: application/json" \
             --data '{"ttl":3600}' \
             "https://api.vercel.com/aliases/$DEPLOYMENT_ID/protection-bypass?teamId=$VERCEL_ORG_ID")
-          SHARE_SECRET=$(node -e 'const v=JSON.parse(process.argv[1]); process.stdout.write(v.value || "")' "$SHARE_JSON")
-          test -n "$SHARE_SECRET" || { echo "Temporary share secret not generated"; exit 1; }
+          SHARE_SECRET=$(node -e 'const v=JSON.parse(process.argv[1]); const x=v.value ?? v.protectionBypass ?? v.secret ?? v.bypass ?? v.protectionBypass?.value; process.stdout.write(typeof x === "string" ? x : "")' "$SHARE_JSON")
+          if [ -z "$SHARE_SECRET" ]; then
+            node -e 'const v=JSON.parse(process.argv[1]); console.log("Share response keys:", Object.keys(v).join(","))' "$SHARE_JSON"
+            echo "Temporary share secret not generated"
+            exit 1
+          fi
           echo "::add-mask::$SHARE_SECRET"
           echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> "$GITHUB_ENV"
           echo "SHARE_SECRET=$SHARE_SECRET" >> "$GITHUB_ENV"
