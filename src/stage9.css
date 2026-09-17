@@ -107,7 +107,22 @@
 }
 
 .compare-col .source-links {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.compare-col .source-links a {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.compare-col .source-links a svg {
+  flex: 0 0 auto;
 }
 
 .remove-compare {
