@@ -1,0 +1,294 @@
+/* Stage 8 — ranking UX redesign.
+   Goal: keep the complete 20/20 evidence contract while removing horizontal navigation.
+   Visual direction: editorial outdoor field guide rather than another rounded SaaS table. */
+
+#ranking.ranking-section {
+  background: #f7f4ec;
+  border: 1px solid #d8ded6;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+#ranking .section-title-row {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #d8ded6;
+}
+
+#ranking .section-title-row h2 {
+  margin-bottom: .55rem;
+  font-size: clamp(2rem, 3.4vw, 3.35rem);
+  letter-spacing: -.045em;
+}
+
+#ranking .toolbar {
+  position: sticky;
+  top: .75rem;
+  z-index: 8;
+  margin: 1rem 0 1.15rem;
+  padding: .72rem;
+  border: 1px solid #d6ddd4;
+  border-radius: 10px;
+  background: rgba(247, 244, 236, .96);
+  backdrop-filter: blur(12px);
+}
+
+#ranking .searchbox input {
+  border-radius: 7px;
+  background: #fffdf8;
+}
+
+#ranking .ranking-table-wrap {
+  overflow: visible;
+}
+
+#ranking .stage7-ranking-table {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#ranking .stage7-ranking-table thead {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+#ranking .stage7-ranking-table tbody {
+  display: grid;
+}
+
+#ranking .stage7-ranking-table tr {
+  display: grid;
+  grid-template-columns: 54px 92px minmax(180px, 1.25fr) minmax(96px, .62fr) minmax(138px, .9fr) minmax(140px, .82fr) 92px 44px;
+  grid-template-areas:
+    "rank photo model mass insulation price status compare"
+    "rank photo model gsm gsm ratings details compare";
+  column-gap: .85rem;
+  row-gap: .7rem;
+  align-items: center;
+  min-width: 0;
+  padding: 1rem .15rem;
+  border-bottom: 1px solid #d8ded6;
+}
+
+#ranking .stage7-ranking-table tr:first-child {
+  border-top: 1px solid #d8ded6;
+}
+
+#ranking .stage7-ranking-table tr:hover {
+  background: rgba(255, 253, 248, .78);
+}
+
+#ranking .stage7-ranking-table td {
+  min-width: 0 !important;
+  width: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  text-align: left !important;
+  vertical-align: middle;
+}
+
+#ranking .stage7-ranking-table td:nth-child(1) { grid-area: rank; align-self: stretch; display: grid; place-items: start center; padding-top: .25rem !important; }
+#ranking .stage7-ranking-table td:nth-child(2) { grid-area: model; }
+#ranking .stage7-ranking-table td:nth-child(3) { grid-area: photo; }
+#ranking .stage7-ranking-table td:nth-child(4) { grid-area: mass; }
+#ranking .stage7-ranking-table td:nth-child(5) { grid-area: insulation; }
+#ranking .stage7-ranking-table td:nth-child(6) { grid-area: gsm; }
+#ranking .stage7-ranking-table td:nth-child(7) { grid-area: price; }
+#ranking .stage7-ranking-table td:nth-child(8) { grid-area: ratings; }
+#ranking .stage7-ranking-table td:nth-child(9) { grid-area: status; }
+#ranking .stage7-ranking-table td:nth-child(10) { grid-area: details; }
+#ranking .stage7-ranking-table td:nth-child(11) { grid-area: compare; display: grid; place-items: center; }
+
+#ranking .stage7-ranking-table td:nth-child(1) > b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.35rem;
+  line-height: 1;
+  letter-spacing: -.04em;
+  color: #203128;
+}
+
+#ranking .stage7-ranking-table td:nth-child(2) strong {
+  display: block;
+  margin-bottom: .16rem;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #5c7061;
+}
+
+#ranking .stage7-ranking-table td:nth-child(2) > span {
+  display: block;
+  margin-bottom: .3rem;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: #152019;
+}
+
+#ranking .stage7-ranking-table td:nth-child(2) > small {
+  display: block;
+  max-width: 42ch;
+  font-size: .77rem;
+  line-height: 1.45;
+  color: #69736b;
+}
+
+#ranking .table-photo {
+  width: 88px;
+  height: 104px;
+  border: 0;
+  border-radius: 7px;
+  background: #ecefe8;
+}
+
+#ranking .table-photo .compact-photo {
+  min-height: 104px;
+  height: 104px;
+}
+
+#ranking .stage7-ranking-table td:nth-child(4)::before,
+#ranking .stage7-ranking-table td:nth-child(5)::before,
+#ranking .stage7-ranking-table td:nth-child(6)::before,
+#ranking .stage7-ranking-table td:nth-child(7)::before,
+#ranking .stage7-ranking-table td:nth-child(8)::before,
+#ranking .stage7-ranking-table td:nth-child(9)::before,
+#ranking .stage7-ranking-table td:nth-child(10)::before {
+  display: block;
+  margin-bottom: .25rem;
+  font-size: .61rem;
+  font-weight: 900;
+  letter-spacing: .11em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: #7b847d;
+}
+
+#ranking .stage7-ranking-table td:nth-child(4)::before { content: "Masa"; }
+#ranking .stage7-ranking-table td:nth-child(5)::before { content: "Izolacja"; }
+#ranking .stage7-ranking-table td:nth-child(6)::before { content: "Gramatura / status"; }
+#ranking .stage7-ranking-table td:nth-child(7)::before { content: "Cena"; }
+#ranking .stage7-ranking-table td:nth-child(8)::before { content: "Oceny 1–5"; }
+#ranking .stage7-ranking-table td:nth-child(9)::before { content: "Dowody"; }
+#ranking .stage7-ranking-table td:nth-child(10)::before { content: "Profil"; }
+
+#ranking .table-gsm > span,
+#ranking .table-market-price > b,
+#ranking .stage7-ranking-table td:nth-child(4),
+#ranking .stage7-ranking-table td:nth-child(5) {
+  font-size: .82rem;
+  line-height: 1.4;
+}
+
+#ranking .table-market-price small {
+  margin-top: .2rem;
+  font-size: .66rem;
+}
+
+#ranking .rating-summary {
+  grid-template-columns: repeat(3, minmax(46px, 1fr));
+  gap: .26rem;
+}
+
+#ranking .rating-summary span {
+  padding: .32rem .36rem;
+  border-radius: 5px;
+  background: #ebece5;
+}
+
+#ranking .rating-summary small {
+  font-size: .58rem;
+  letter-spacing: .02em;
+}
+
+#ranking .rating-summary b {
+  font-size: .74rem;
+}
+
+#ranking .status-badge {
+  border-radius: 5px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+#ranking .details-link {
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+#ranking .rowcompare {
+  border-radius: 7px;
+  background: #fffdf8;
+}
+
+#ranking .row-disliked {
+  opacity: .58;
+}
+
+@media (max-width: 1100px) and (min-width: 851px) {
+  #ranking .stage7-ranking-table tr {
+    grid-template-columns: 48px 86px minmax(0, 1fr) minmax(0, 1fr) 58px;
+    grid-template-areas:
+      "rank photo model model compare"
+      "rank photo status status compare"
+      "rank mass insulation price details"
+      "rank gsm gsm gsm details"
+      "rank ratings ratings ratings details";
+    column-gap: .75rem;
+    row-gap: .58rem;
+  }
+
+  #ranking .stage7-ranking-table td:nth-child(9)::before,
+  #ranking .stage7-ranking-table td:nth-child(10)::before {
+    display: none;
+  }
+
+  #ranking .stage7-ranking-table td:nth-child(9) {
+    align-self: start;
+  }
+
+  #ranking .stage7-ranking-table td:nth-child(10) {
+    align-self: end;
+  }
+
+  #ranking .rating-summary {
+    grid-template-columns: repeat(6, minmax(54px, 1fr));
+  }
+}
+
+@media (max-width: 850px) {
+  #ranking.ranking-section {
+    border-radius: 10px;
+  }
+
+  #ranking .toolbar {
+    position: static;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    backdrop-filter: none;
+  }
+
+  #ranking .mobile-rank-card {
+    border-radius: 8px;
+    background: #fffdf8;
+  }
+
+  #ranking .mobile-spec-grid span {
+    border-radius: 6px;
+    background: #eeefe9;
+  }
+}
