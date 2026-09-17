@@ -162,19 +162,16 @@ jobs:
             rm -f stage8-prod-revoke.json
           fi
 
-      - name: Promote tested candidate to production
+      - name: Deploy tested prebuilt artifact to production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
-          HTTP_CODE=$(curl -sS -o stage8-promote-response.txt -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
-            "https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/promote/$CANDIDATE_DEPLOYMENT_ID?teamId=$VERCEL_ORG_ID")
-          echo "Promotion HTTP status: $HTTP_CODE"
-          if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "202" ]; then
-            cat stage8-promote-response.txt
-            exit 1
-          fi
+          npx --yes vercel@latest deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" 2>&1 | tee stage8-production-deploy.log
+          PROD_URL=$(grep -Eo 'https://[^ ]+\.vercel\.app' stage8-production-deploy.log | tail -n 1)
+          test -n "$PROD_URL" || { echo "Production deployment URL not found"; exit 1; }
+          printf '%s\n' "$PROD_URL" | tee stage8-production-url.txt
+          echo "PROD_URL=$PROD_URL" >> "$GITHUB_ENV"
           echo "PROMOTED=1" >> "$GITHUB_ENV"
 
       - name: Wait for canonical alias and verify exact local assets
@@ -231,7 +228,7 @@ jobs:
           mv stage8-layout-tablet.png production-stage8-layout-tablet.png
           mv stage8-layout-mobile.png production-stage8-layout-mobile.png
 
-      - name: Roll back production on post-promotion failure
+      - name: Roll back production on post-deployment failure
         if: failure() && env.PROMOTED == '1'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -252,8 +249,9 @@ jobs:
           path: |
             stage8-prod-deploy.log
             stage8-prod-preview-url.txt
+            stage8-production-deploy.log
+            stage8-production-url.txt
             stage8-prod-expected-assets.txt
-            stage8-promote-response.txt
             stage8-rollback-response.txt
             candidate-stage7-e2e-report.json
             candidate-stage7-e2e-desktop.png
